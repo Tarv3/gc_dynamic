@@ -73,8 +73,8 @@ fn main() {
         backface_culling: BackfaceCullingMode::CullClockwise,
         ..Default::default()
     };
-    let map = load_image(&window.display, "AvgTemp -20_30.png");
-    let montly_values = load_monthly_values(
+    let map = load_image(&window.display, "assets/AvgTemp -20_30.png");
+    let monthly_values = load_monthly_values(
         &window.display,
         "assets/tempgrid.bin",
         Some(Range::new(-20.0, 30.0)),
@@ -89,7 +89,7 @@ fn main() {
     ).unwrap();
 
     glstate.add_new_value(vec![map], ImString::new("Average Temperature"), false);
-    glstate.add_new_value(montly_values, ImString::new("Monthly Temperature"), true);
+    glstate.add_new_value(monthly_values, ImString::new("Monthly Temperature"), true);
 
     let identity: na::Matrix4<f32> = na::Matrix4::identity();
 
