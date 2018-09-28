@@ -1,0 +1,13 @@
+[package]
+name = "gc_renderer"
+version = "0.1.0"
+authors = ["Josh <tarv360@gmail.com>"]
+
+[dependencies]
+glium = "0.22"
+nalgebra = "0.16"
+image = "0.19"
+renderer = {git = "https://github.com/Tarv3/renderer"}
+imgui = "0.0.20"
+imgui-glium-renderer = "0.0.20"
+heat_map = {git = "https://github.com/Tarv3/heat_map"}
