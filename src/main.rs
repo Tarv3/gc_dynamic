@@ -36,33 +36,70 @@ use support::load_image;
 use util::*;
 use window::Window;
 
-fn main() {
-    let mut events_loop = EventsLoop::new();
-    let mut window = Window::new(false, true, true, [900.0, 900.0], &events_loop);
+fn build_state(display: &Display) -> GlobalState {
     let mut camera = PCamera::new(
         Vec3::new(0.0, 0.0, 4.0),
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(0.0, 1.0, 0.0),
         Projection::Perspective(PV::new(1.0, PI * 0.25, 0.1, 10.0)),
     );
-    let sphere = Sphere::new(200, 200);
-    let verts = sphere.generate_vertices();
-
-    let buffer = VertexBuffer::new(&window.display, &verts).unwrap();
 
     let hsv_program = Program::from_source(
-        &window.display,
+        display,
         include_str!("shaders/vert.glsl"),
         include_str!("shaders/frag_hsv.glsl"),
         None,
     ).unwrap();
 
     let colour_program = Program::from_source(
-        &window.display,
+        display,
         include_str!("shaders/vert.glsl"),
         include_str!("shaders/frag.glsl"),
         None,
     ).unwrap();
+
+    let monthly_range = [-40.0, 50.0];
+    let (avg, monthly_values) = load_monthly_values(
+        display,
+        "assets/tempgrid.bin",
+        Range::new(monthly_range[0], monthly_range[1]),
+    );
+
+    let mut glstate = GlobalState::new_default_tex(
+        display,
+        camera,
+        ImString::new("World Map"),
+        "assets/huge height.jpg",
+        hsv_program,
+        colour_program,
+    ).unwrap();
+
+    glstate.add_new_value(
+        avg,
+        ImString::new("Average Temperature"),
+        Measurement::Is {
+            init_range: monthly_range,
+            range: monthly_range,
+        },
+    );
+    glstate.add_new_value(
+        monthly_values,
+        ImString::new("Monthly Temperature"),
+        Measurement::Is {
+            init_range: monthly_range,
+            range: monthly_range,
+        },
+    );
+
+    glstate
+}
+
+fn main() {
+    let mut events_loop = EventsLoop::new();
+    let mut window = Window::new(false, true, true, [900.0, 900.0], &events_loop);
+    
+    let mut glstate = build_state(&window.display);
+    let identity: na::Matrix4<f32> = na::Matrix4::identity();
 
     let draw_parameters = DrawParameters {
         depth: glium::Depth {
@@ -73,35 +110,6 @@ fn main() {
         backface_culling: BackfaceCullingMode::CullClockwise,
         ..Default::default()
     };
-    let map = load_image(&window.display, "assets/AvgTemp -20_30.png");
-    let monthly_values = load_monthly_values(
-        &window.display,
-        "assets/tempgrid.bin",
-        Some(Range::new(-20.0, 30.0)),
-    );
-
-    let mut glstate = GlobalState::new_default_tex(
-        &window.display,
-        camera,
-        "assets/map_pic.jpg",
-        hsv_program,
-        colour_program,
-    ).unwrap();
-
-    glstate.add_new_value(
-        vec![map],
-        ImString::new("Average Temperature"),
-        Measurement::IsNot,
-    );
-    glstate.add_new_value(
-        monthly_values,
-        ImString::new("Monthly Temperature"),
-        Measurement::Is {
-            range: [-20.0, 30.0],
-        },
-    );
-
-    let identity: na::Matrix4<f32> = na::Matrix4::identity();
 
     support::run(
         &mut window,

@@ -68,6 +68,7 @@ impl GlobalState {
     pub fn new_default_tex(
         window: &Display,
         camera: PCamera,
+        tex_name: ImString,
         path: impl AsRef<Path>,
         hsv_program: Program,
         colour_program: Program,
@@ -75,13 +76,13 @@ impl GlobalState {
         let image = load_image(window, path);
         let value = Value {
             measurement: Measurement::IsNot,
-            name: ImString::new("World Map"),
+            name: tex_name,
             tex_indices: vec![0],
             selection: 0.0,
             time: false,
         };
 
-        let sphere = Sphere::new(200, 200);
+        let sphere = Sphere::new(1000, 1000);
         let verts = sphere.generate_vertices();
         let buffer = VertexBuffer::new(window, &verts)?;
         let zoom = Zoom {
@@ -212,7 +213,20 @@ impl GlobalState {
             height_scale: self.variables.height
         };
         match self.is_selected_measurement() {
-            Measurement::Is { .. } => {
+            Measurement::Is { init_range, range } => {
+                let uniforms = uniform! {
+                    overlay: &self.overlay,
+                    colour_map1: tex1,
+                    colour_map2: tex2,
+                    interpolation: interp,
+                    init_range: init_range,
+                    range: range,
+                    view: *self.camera.zoomed_view_matrix(self.zoom.get_scale()).as_ref(),
+                    eye: *self.camera.position.coords.as_ref(),
+                    rotation: model_matrix,
+                    height_map: &self.height_map,
+                    height_scale: self.variables.height
+                };
                 target
                     .draw(
                         &self.sphere,
@@ -224,6 +238,15 @@ impl GlobalState {
                     .unwrap();
             }
             Measurement::IsNot => {
+                let uniforms = uniform! {
+                    overlay: &self.overlay,
+                    colour_map1: tex1,
+                    view: *self.camera.zoomed_view_matrix(self.zoom.get_scale()).as_ref(),
+                    eye: *self.camera.position.coords.as_ref(),
+                    rotation: model_matrix,
+                    height_map: &self.height_map,
+                    height_scale: self.variables.height
+                };
                 target
                     .draw(
                         &self.sphere,
@@ -239,9 +262,13 @@ impl GlobalState {
 
     pub fn build_ui(&mut self, ui: &Ui) {
         let frame_size = ui.frame_size();
+        let window_width = 300.0;
 
         ui.window(im_str!("State"))
-            .size((300.0, frame_size.logical_size.1 as f32), ImGuiCond::Always)
+            .size(
+                (window_width, frame_size.logical_size.1 as f32),
+                ImGuiCond::Always,
+            )
             .position((0.0, 0.0), ImGuiCond::Always)
             .collapsible(false)
             .movable(false)
@@ -254,7 +281,7 @@ impl GlobalState {
                 ui.separator();
                 ui.text("Select value to display");
                 ui.spacing();
-                self.build_value_selector(ui);
+                self.build_value_selector(ui, window_width);
             })
     }
 
@@ -289,7 +316,7 @@ impl GlobalState {
         });
     }
 
-    fn build_value_selector(&mut self, ui: &Ui) {
+    fn build_value_selector(&mut self, ui: &Ui, window_width: f32) {
         for (i, value) in self.values.iter().enumerate() {
             ui.radio_button(value.name.as_ref(), &mut self.selected, i as i32);
         }
@@ -297,14 +324,17 @@ impl GlobalState {
         ui.spacing();
         ui.separator();
         ui.text(&selected.name);
-        selected.build_ui_elements(ui);
+        selected.build_ui_elements(ui, window_width);
     }
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum Measurement {
     IsNot,
-    Is { range: [f32; 2] },
+    Is {
+        init_range: [f32; 2],
+        range: [f32; 2],
+    },
 }
 
 struct Value {
@@ -316,57 +346,77 @@ struct Value {
 }
 
 impl Value {
-    pub fn build_ui_elements(&mut self, ui: &Ui) {
+    pub fn build_ui_elements(&mut self, ui: &Ui, window_width: f32) {
+        let width = window_width - 100.0;
         if self.tex_indices.len() > 1 {
-            let width = 200.0;
-            let max = (self.tex_indices.len() as i32 - 1) as f32;
             ui.with_item_width(width, || {
-                if ui.slider_float(im_str!("Time"), &mut self.selection, 0.0, max)
-                    .build()
-                {
-                    self.time = false;
-                }
-                ui.same_line_spacing(width, 45.0);
-                if self.time {
-                    if ui.button(im_str!("Pause"), (40.0, 20.0)) {
-                        self.time = false;
-                    }
-                } else {
-                    if ui.button(im_str!("Play"), (40.0, 20.0)) {
-                        self.time = true;
-                    }
-                }
-
-                if let Measurement::Is {
-                    range: ref mut value,
-                } = self.measurement
-                {
-                    let min = -40.0;
-                    let max = 50.0;
-                    let range = max - min;
-                    let middle = (value[0] + value[1]) * 0.5;
-                    let min_width = 200.0 * (middle - min) / range;
-                    ui.with_item_width(min_width, || {
-                        ui.slider_float(im_str!(""), &mut value[0], min, middle)
-                            .build();
-                    });
-                    ui.same_line(min_width);
-                    let max_width = 200.0 - min_width;
-                    ui.with_item_width(max_width + 8.0, || {
-                        ui.slider_float(im_str!("Max Range"), &mut value[1], middle, max)
-                            .build();
-                    });
-                }
+                self.build_time_ui(ui, width);
             });
+        }
+        ui.with_item_width(width, || {
+            self.build_measurement_ui(ui, window_width - 50.0);
+        });
+    }
+
+    pub fn build_time_ui(&mut self, ui: &Ui, width: f32) {
+        let max = (self.tex_indices.len() as i32) as f32;
+
+        if ui.slider_float(im_str!("Time"), &mut self.selection, 0.0, max)
+            .build()
+        {
+            self.time = false;
+        }
+        ui.same_line_spacing(width, 45.0);
+        if self.time {
+            if ui.button(im_str!("Pause"), (40.0, 20.0)) {
+                self.time = false;
+            }
+        } else {
+            if ui.button(im_str!("Play"), (40.0, 20.0)) {
+                self.time = true;
+            }
+        }
+    }
+
+    pub fn build_measurement_ui(&mut self, ui: &Ui, width: f32) {
+        if let Measurement::Is {
+            init_range: [min, max],
+            range: ref mut value,
+        } = self.measurement
+        {
+            let range = max - min;
+            let middle = (value[0] + value[1]) * 0.5;
+            let min_width = (width * (middle - min) / range).round();
+            let min_width = minf32(min_width, 2.0);
+
+            ui.separator();
+            ui.text("Temperature Range");
+            ui.push_item_width(width);
+            ui.input_float2(im_str!("##Range floats"), value)
+                .decimal_precision(3)
+                .build();
+            ui.push_item_width(min_width);
+            ui.slider_float(im_str!("##Min Range"), &mut value[0], min, middle)
+                .build();
+
+            ui.same_line(min_width + 8.0);
+            let max_width = width - min_width;
+            let max_width = minf32(max_width, 2.0);
+            ui.push_item_width(max_width);
+            ui.slider_float(im_str!("##Max Range"), &mut value[1], middle, max)
+                .build();
         }
     }
 
     pub fn get_selected(&self) -> (usize, usize, f32) {
         let mut ceil = self.selection.ceil() as usize;
-        if ceil as usize >= self.tex_indices.len() {
-            ceil -= 1;
+        if ceil >= self.tex_indices.len() {
+            ceil = 0;
         }
-        let floor = self.selection.floor();
+        let mut floor = self.selection.floor();
+        if floor >= self.tex_indices.len() as f32 {
+            floor = (self.tex_indices.len() - 1) as f32;
+        }
         let interpolation = self.selection - floor;
 
         (
@@ -381,7 +431,7 @@ impl Value {
             return;
         }
         self.selection += dt;
-        let max = self.tex_indices.len() as f32 - 1.0;
+        let max = self.tex_indices.len() as f32;
         if self.selection > max {
             self.selection = self.selection - max;
         }
