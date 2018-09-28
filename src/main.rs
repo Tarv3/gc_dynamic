@@ -9,11 +9,11 @@ extern crate nalgebra as na;
 extern crate renderer;
 
 mod input;
+mod sphere;
 mod state;
 mod support;
-mod window;
 mod util;
-mod sphere;
+mod window;
 
 use glium::backend::glutin::Display;
 use glium::index::{NoIndices, PrimitiveType::TrianglesList};
@@ -28,13 +28,13 @@ use imgui::ImString;
 use renderer::{
     camera::{PCamera, Projection}, test, Vec3, PV,
 };
-use state::GlobalState;
+use sphere::Sphere;
+use state::{GlobalState, Measurement};
 use std::f32::consts::PI;
 use std::path::Path;
 use support::load_image;
-use window::Window;
 use util::*;
-use sphere::Sphere;
+use window::Window;
 
 fn main() {
     let mut events_loop = EventsLoop::new();
@@ -88,8 +88,18 @@ fn main() {
         colour_program,
     ).unwrap();
 
-    glstate.add_new_value(vec![map], ImString::new("Average Temperature"), false);
-    glstate.add_new_value(monthly_values, ImString::new("Monthly Temperature"), true);
+    glstate.add_new_value(
+        vec![map],
+        ImString::new("Average Temperature"),
+        Measurement::IsNot,
+    );
+    glstate.add_new_value(
+        monthly_values,
+        ImString::new("Monthly Temperature"),
+        Measurement::Is {
+            range: [-20.0, 30.0],
+        },
+    );
 
     let identity: na::Matrix4<f32> = na::Matrix4::identity();
 
@@ -97,13 +107,14 @@ fn main() {
         &mut window,
         &mut events_loop,
         |target, ui, mouse, events, dt| {
+            let hidpi = ui.frame_size().hidpi_factor as f32;
             glstate.update_time(dt);
             glstate.build_ui(ui);
-            glstate.handle_mouse(mouse);
+            glstate.handle_mouse(mouse, hidpi);
             for event in events {
                 input::handle_input(event, &mut glstate.camera);
             }
-            
+
             target.clear_color_and_depth((1.0, 1.0, 1.0, 0.0), 1.0);
             glstate.draw_globe(target, &draw_parameters, *identity.as_ref());
             true

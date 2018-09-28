@@ -7,11 +7,11 @@ use imgui::*;
 use input::MouseState;
 use na;
 use renderer::camera::PCamera;
+use sphere::Sphere;
 use std::error::Error;
 use std::path::Path;
 use support::load_image;
 use util::*;
-use sphere::Sphere;
 
 pub struct Zoom {
     pub rate: f32,
@@ -44,6 +44,7 @@ impl Zoom {
 struct StateVariables {
     pub height: f32,
     pub time_multi: f32,
+    pub drag_speed: f32,
 }
 
 pub struct GlobalState {
@@ -73,7 +74,7 @@ impl GlobalState {
     ) -> Result<GlobalState, Box<Error>> {
         let image = load_image(window, path);
         let value = Value {
-            measurement: false,
+            measurement: Measurement::IsNot,
             name: ImString::new("World Map"),
             tex_indices: vec![0],
             selection: 0.0,
@@ -93,6 +94,7 @@ impl GlobalState {
         let variables = StateVariables {
             height: 0.1,
             time_multi: 1.0,
+            drag_speed: 0.02,
         };
 
         Ok(GlobalState {
@@ -114,7 +116,7 @@ impl GlobalState {
         &mut self,
         mut new_textures: Vec<Texture2d>,
         name: ImString,
-        measurement: bool,
+        measurement: Measurement,
     ) {
         let len = self.textures.len();
         let indices = (len..len + new_textures.len()).collect();
@@ -130,14 +132,16 @@ impl GlobalState {
         self.textures.append(&mut new_textures);
     }
 
-    pub fn handle_mouse(&mut self, mouse: &MouseState) {
+    pub fn handle_mouse(&mut self, mouse: &MouseState, hidpi: f32) {
         if let Some(drag) = mouse.get_drag_off_ui() {
             let abs_x = drag.x.abs();
             let abs_y = drag.y.abs();
             let drag_x = clampf32(self.zoom.get_scale() * drag.x, -abs_x, abs_x);
             let drag_y = clampf32(self.zoom.get_scale() * drag.y, -abs_y, abs_y);
-            self.camera.rotate_around_look_horizontal(-drag_x * 0.01);
-            self.camera.rotate_around_look_vertical(drag_y * 0.01);
+            self.camera
+                .rotate_around_look_horizontal(-drag_x * self.variables.drag_speed * hidpi);
+            self.camera
+                .rotate_around_look_vertical(drag_y * self.variables.drag_speed * hidpi);
         }
         if !mouse.on_ui {
             self.zoom.add_zoom(-mouse.mouse.wheel);
@@ -158,10 +162,10 @@ impl GlobalState {
         None
     }
 
-    pub fn is_selected_measurement(&self) -> bool {
+    pub fn is_selected_measurement(&self) -> Measurement {
         match self.get_selected() {
             Some(value) => value.measurement,
-            None => false,
+            None => Measurement::IsNot,
         }
     }
 
@@ -207,27 +211,29 @@ impl GlobalState {
             height_map: &self.height_map,
             height_scale: self.variables.height
         };
-
-        if self.is_selected_measurement() {
-            target
-                .draw(
-                    &self.sphere,
-                    NoIndices(TrianglesList),
-                    &self.hsv_program,
-                    &uniforms,
-                    draw_params,
-                )
-                .unwrap();
-        } else {
-            target
-                .draw(
-                    &self.sphere,
-                    NoIndices(TrianglesList),
-                    &self.colour_program,
-                    &uniforms,
-                    draw_params,
-                )
-                .unwrap();
+        match self.is_selected_measurement() {
+            Measurement::Is { .. } => {
+                target
+                    .draw(
+                        &self.sphere,
+                        NoIndices(TrianglesList),
+                        &self.hsv_program,
+                        &uniforms,
+                        draw_params,
+                    )
+                    .unwrap();
+            }
+            Measurement::IsNot => {
+                target
+                    .draw(
+                        &self.sphere,
+                        NoIndices(TrianglesList),
+                        &self.colour_program,
+                        &uniforms,
+                        draw_params,
+                    )
+                    .unwrap();
+            }
         }
     }
 
@@ -266,6 +272,12 @@ impl GlobalState {
 
     fn build_variable_sliders(&mut self, ui: &Ui, width: f32) {
         ui.with_item_width(width, || {
+            ui.slider_float(
+                im_str!("Drag Speed"),
+                &mut self.variables.drag_speed,
+                0.005,
+                0.08,
+            ).build();
             ui.slider_float(im_str!("Height"), &mut self.variables.height, 0.0, 1.0)
                 .build();
             ui.slider_float(
@@ -289,8 +301,14 @@ impl GlobalState {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum Measurement {
+    IsNot,
+    Is { range: [f32; 2] },
+}
+
 struct Value {
-    measurement: bool,
+    measurement: Measurement,
     name: ImString,
     tex_indices: Vec<usize>,
     selection: f32,
@@ -308,17 +326,38 @@ impl Value {
                 {
                     self.time = false;
                 }
+                ui.same_line_spacing(width, 45.0);
+                if self.time {
+                    if ui.button(im_str!("Pause"), (40.0, 20.0)) {
+                        self.time = false;
+                    }
+                } else {
+                    if ui.button(im_str!("Play"), (40.0, 20.0)) {
+                        self.time = true;
+                    }
+                }
+
+                if let Measurement::Is {
+                    range: ref mut value,
+                } = self.measurement
+                {
+                    let min = -40.0;
+                    let max = 50.0;
+                    let range = max - min;
+                    let middle = (value[0] + value[1]) * 0.5;
+                    let min_width = 200.0 * (middle - min) / range;
+                    ui.with_item_width(min_width, || {
+                        ui.slider_float(im_str!(""), &mut value[0], min, middle)
+                            .build();
+                    });
+                    ui.same_line(min_width);
+                    let max_width = 200.0 - min_width;
+                    ui.with_item_width(max_width + 8.0, || {
+                        ui.slider_float(im_str!("Max Range"), &mut value[1], middle, max)
+                            .build();
+                    });
+                }
             });
-            ui.same_line_spacing(width, 45.0);
-            if self.time {
-                if ui.button(im_str!("Pause"), (40.0, 20.0)) {
-                    self.time = false;
-                }
-            } else {
-                if ui.button(im_str!("Play"), (40.0, 20.0)) {
-                    self.time = true;
-                }
-            }
         }
     }
 
