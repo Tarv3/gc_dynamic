@@ -1,4 +1,3 @@
-use glium::VertexBuffer;
 use std::f32::consts::PI;
 use util::Vertex;
 
@@ -21,8 +20,8 @@ impl Sphere {
         for long in 0..self.vertical_divs {
             let y_tex1 = long as f32 / self.vertical_divs as f32;
             let y_tex2 = (long + 1) as f32 / self.vertical_divs as f32;
-            let vert1 = (PI * (y_tex1 + 0.5));
-            let vert2 = (PI * (y_tex2 + 0.5));
+            let vert1 = PI * (y_tex1 + 0.5);
+            let vert2 = PI * (y_tex2 + 0.5);
             let cos_vert1 = vert1.cos();
             let sin_vert1 = vert1.sin();
             let cos_vert2 = vert2.cos();
@@ -31,8 +30,8 @@ impl Sphere {
             for lat in 0..self.horizontal_divs {
                 let x_tex1 = lat as f32 / self.horizontal_divs as f32;
                 let x_tex2 = (lat + 1) as f32 / self.horizontal_divs as f32;
-                let horz1 = (PI * 2.0 * (x_tex1 + 0.5));
-                let horz2 = (PI * 2.0 * (x_tex2 + 0.5));
+                let horz1 = PI * 2.0 * (x_tex1 + 0.5);
+                let horz2 = PI * 2.0 * (x_tex2 + 0.5);
                 let sin_horz1 = horz1.sin();
                 let cos_horz1 = horz1.cos();
                 let sin_horz2 = horz2.sin();

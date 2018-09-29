@@ -1,17 +1,20 @@
+use evec::Evec;
+use glium;
 use glium::index::{NoIndices, PrimitiveType::TrianglesList};
 use glium::{
-    backend::glutin::Display, texture::Texture2d, DrawParameters, Program, Surface, VertexBuffer,
+    backend::glutin::Display, draw_parameters::BackfaceCullingMode, texture::Texture2d,
+    DrawParameters, Program, Surface, VertexBuffer,
 };
-use heat_map;
 use imgui::*;
 use input::MouseState;
-use na;
 use renderer::camera::PCamera;
 use sphere::Sphere;
 use std::error::Error;
+use std::mem;
 use std::path::Path;
 use support::load_image;
 use util::*;
+use viewports::{DivDirection, Division, ViewPort, ViewRect};
 
 pub struct Zoom {
     pub rate: f32,
@@ -55,6 +58,11 @@ pub struct GlobalState {
 
     sphere: VertexBuffer<Vertex>,
 
+    main_viewport: ViewRect,
+    divisions: Evec<Division>,
+    viewports: Vec<ViewPort>,
+    division_order: Vec<usize>,
+
     height_map: Texture2d,
     overlay: Texture2d,
     textures: Vec<Texture2d>,
@@ -62,12 +70,15 @@ pub struct GlobalState {
 
     selected: i32,
     variables: StateVariables,
+    menu_width: f32,
 }
 
 impl GlobalState {
     pub fn new_default_tex(
         window: &Display,
         camera: PCamera,
+        height: impl AsRef<Path>,
+        overlay: impl AsRef<Path>,
         tex_name: ImString,
         path: impl AsRef<Path>,
         hsv_program: Program,
@@ -80,9 +91,10 @@ impl GlobalState {
             tex_indices: vec![0],
             selection: 0.0,
             time: false,
+            time_updated: false,
         };
 
-        let sphere = Sphere::new(1000, 1000);
+        let sphere = Sphere::new(250, 250);
         let verts = sphere.generate_vertices();
         let buffer = VertexBuffer::new(window, &verts)?;
         let zoom = Zoom {
@@ -97,6 +109,17 @@ impl GlobalState {
             time_multi: 1.0,
             drag_speed: 0.02,
         };
+        let main_viewport = ViewRect {
+            left: 0.33,
+            right: 1.0,
+            bottom: 0.0,
+            top: 1.0,
+        };
+        let division = Division::None { selected: 0, id: 0 };
+        let divisions = Evec::from(vec![division]);
+
+        let mut viewports = vec![];
+        division.build_viewports_evec(main_viewport, &divisions, &mut viewports);
 
         Ok(GlobalState {
             camera,
@@ -104,12 +127,20 @@ impl GlobalState {
             hsv_program,
             colour_program,
             sphere: buffer,
-            height_map: load_image(window, "assets/whms.png"),
-            overlay: load_image(window, "assets/Pure B and W Map.png"),
+
+            main_viewport,
+            divisions,
+            viewports,
+            division_order: vec![],
+
+            height_map: load_image(window, height),
+            overlay: load_image(window, overlay),
             textures: vec![image],
             values: vec![value],
+
             selected: 0,
             variables,
+            menu_width: 300.0,
         })
     }
 
@@ -127,6 +158,7 @@ impl GlobalState {
             tex_indices: indices,
             selection: 0.0,
             time: false,
+            time_updated: false,
         };
 
         self.values.push(value);
@@ -149,33 +181,40 @@ impl GlobalState {
         }
     }
 
-    pub fn get_selected(&self) -> Option<&Value> {
-        if (self.selected as usize) < self.values.len() {
-            return Some(&self.values[self.selected as usize]);
+    pub fn handle_resize(&mut self, resized: (f64, f64)) {
+        let (x, y) = (resized.0 as f32, resized.1 as f32);
+        let new_left = self.menu_width / x;
+        self.main_viewport.left = new_left;
+        self.rebuild_viewports();
+    }
+
+    fn get_selected(&self, index: usize) -> Option<&Value> {
+        if index < self.values.len() {
+            return Some(&self.values[index]);
         }
         None
     }
 
-    pub fn get_selected_mut(&mut self) -> Option<&mut Value> {
-        if (self.selected as usize) < self.values.len() {
-            return Some(&mut self.values[self.selected as usize]);
+    fn get_selected_mut(&mut self, index: usize) -> Option<&mut Value> {
+        if index < self.values.len() {
+            return Some(&mut self.values[index]);
         }
         None
     }
 
-    pub fn is_selected_measurement(&self) -> Measurement {
-        match self.get_selected() {
+    pub fn is_selected_measurement(&self, index: usize) -> Measurement {
+        match self.get_selected(index) {
             Some(value) => value.measurement,
             None => Measurement::IsNot,
         }
     }
 
-    pub fn get_selected_textures(&self) -> Option<(&Texture2d, &Texture2d, f32)> {
-        let value = match self.get_selected() {
+    pub fn get_selected_textures(&self, index: usize) -> Option<(&Texture2d, &Texture2d, f32)> {
+        let value = match self.get_selected(index) {
             Some(value) => value,
             None => return None,
         };
-        let (i, j, interp) = value.get_selected();
+        let (i, j, interp) = value.get_textures();
         let len = self.textures.len();
         if i < len && j < len {
             return Some((&self.textures[i], &self.textures[j], interp));
@@ -184,35 +223,88 @@ impl GlobalState {
     }
 
     pub fn update_time(&mut self, dt: f32) {
+        self.reset_time_updates();
         let time_multi = self.variables.time_multi;
-        let value = match self.get_selected_mut() {
-            Some(value) => value,
-            None => return,
-        };
-        if value.time {
-            value.increase_selection(dt * time_multi);
+        let mut viewports = vec![];
+        mem::swap(&mut viewports, &mut self.viewports);
+        for viewport in &viewports {
+            let index = viewport.get_div_selection(&self.divisions.values) as usize;
+            let value = match self.get_selected_mut(index) {
+                Some(value) => value,
+                None => return,
+            };
+            if value.time && !value.time_updated {
+                value.increase_selection(dt * time_multi);
+                value.time_updated = true;
+            }
+        }
+        mem::swap(&mut viewports, &mut self.viewports);
+    }
+
+    pub fn reset_time_updates(&mut self) {
+        for value in &mut self.values {
+            value.time_updated = false;
+        }
+    }
+
+    pub fn reset_time_values(&mut self) {
+        for value in &mut self.values {
+            value.selection = 0.0;
+        }
+    }
+
+    pub fn rebuild_viewports(&mut self) {
+        let division = self.divisions[0].unwrap();
+        let main_viewport = self.main_viewport;
+        let mut viewports = vec![];
+        mem::swap(&mut viewports, &mut self.viewports);
+        viewports.clear();
+        division.build_viewports_evec(main_viewport, &self.divisions, &mut viewports);
+        mem::swap(&mut viewports, &mut self.viewports);
+    }
+
+    pub fn render_viewports<T: Surface + ?Sized>(
+        &self,
+        target: &mut T,
+        model_matrix: [[f32; 4]; 4],
+    ) {
+        let frame = target.get_dimensions();
+        for ref viewport in self.viewports.iter() {
+            let rect = viewport.glium_viewport(frame);
+            let draw_parameters = DrawParameters {
+                depth: glium::Depth {
+                    test: glium::DepthTest::IfLess,
+                    write: true,
+                    ..Default::default()
+                },
+                backface_culling: BackfaceCullingMode::CullClockwise,
+                viewport: Some(rect),
+                ..Default::default()
+            };
+
+            let index = viewport.div_id;
+            let index = self.divisions[index].unwrap().get_selected() as usize;
+            let view_matrix = viewport.view_matrix(&self.camera, self.zoom.get_scale());
+            self.draw_globe(
+                index,
+                target,
+                &draw_parameters,
+                *view_matrix.as_ref(),
+                model_matrix,
+            );
         }
     }
 
     pub fn draw_globe<T: Surface + ?Sized>(
         &self,
+        index: usize,
         target: &mut T,
         draw_params: &DrawParameters,
+        view_matrix: [[f32; 4]; 4],
         model_matrix: [[f32; 4]; 4],
     ) {
-        let (tex1, tex2, interp) = self.get_selected_textures().unwrap();
-        let uniforms = uniform! {
-            overlay: &self.overlay,
-            colour_map1: tex1,
-            colour_map2: tex2,
-            interpolation: interp,
-            view: *self.camera.zoomed_view_matrix(self.zoom.get_scale()).as_ref(),
-            eye: *self.camera.position.coords.as_ref(),
-            rotation: model_matrix,
-            height_map: &self.height_map,
-            height_scale: self.variables.height
-        };
-        match self.is_selected_measurement() {
+        let (tex1, tex2, interp) = self.get_selected_textures(index).unwrap();
+        match self.is_selected_measurement(index) {
             Measurement::Is { init_range, range } => {
                 let uniforms = uniform! {
                     overlay: &self.overlay,
@@ -221,7 +313,7 @@ impl GlobalState {
                     interpolation: interp,
                     init_range: init_range,
                     range: range,
-                    view: *self.camera.zoomed_view_matrix(self.zoom.get_scale()).as_ref(),
+                    view: view_matrix,
                     eye: *self.camera.position.coords.as_ref(),
                     rotation: model_matrix,
                     height_map: &self.height_map,
@@ -241,7 +333,7 @@ impl GlobalState {
                 let uniforms = uniform! {
                     overlay: &self.overlay,
                     colour_map1: tex1,
-                    view: *self.camera.zoomed_view_matrix(self.zoom.get_scale()).as_ref(),
+                    view: view_matrix,
                     eye: *self.camera.position.coords.as_ref(),
                     rotation: model_matrix,
                     height_map: &self.height_map,
@@ -260,17 +352,70 @@ impl GlobalState {
         }
     }
 
+    pub fn build_viewport_uis(&mut self, ui: &Ui) {
+        let frame_size = ui.frame_size().logical_size;
+        let window_width = self.menu_width - 100.0;
+        let mut viewports = vec![];
+        let mut divisions = Evec::new();
+        let mut rebuild = false;
+        mem::swap(&mut viewports, &mut self.viewports);
+        mem::swap(&mut divisions, &mut self.divisions);
+        for (i, viewport) in viewports.iter().enumerate() {
+            let rect = viewport.glium_vp_logicalsize(frame_size);
+            let string = ImString::new(format!("Viewport {}", i));
+            ui.window(string.as_ref())
+                .size((window_width, rect.height as f32), ImGuiCond::Always)
+                .position(
+                    (
+                        rect.left as f32,
+                        frame_size.1 as f32 - (rect.bottom + rect.height) as f32,
+                    ),
+                    ImGuiCond::Always,
+                )
+                .collapsible(true)
+                .movable(false)
+                .resizable(false)
+                .build(|| {
+                    ui.text("Select value to display");
+                    ui.spacing();
+                    {
+                        let div = viewport.get_div_selection_mut(&mut divisions.values);
+                        self.build_value_selector(ui, window_width, div);
+                    }
+                    let vert = ImString::new(format!("Vertical ##{}", i));
+                    let horizontal = ImString::new(format!("Horizontal ##{}", i));
+                    let div = divisions[viewport.div_id].unwrap();
+                    if ui.button(vert.as_ref(), (80.0, 40.0)) {
+                        div.divide(DivDirection::Verticle(0.5), &mut divisions);
+                        self.division_order.push(div.get_id());
+                        rebuild = true;
+                    }
+                    if ui.button(horizontal.as_ref(), (80.0, 40.0)) {
+                        div.divide(DivDirection::Horizontal(0.5), &mut divisions);
+                        self.division_order.push(div.get_id());
+                        rebuild = true;
+                    }
+                });
+        }
+        mem::swap(&mut viewports, &mut self.viewports);
+        mem::swap(&mut divisions, &mut self.divisions);
+
+        if rebuild {
+            self.rebuild_viewports();
+        }
+    }
+
     pub fn build_ui(&mut self, ui: &Ui) {
         let frame_size = ui.frame_size();
-        let window_width = 300.0;
-
+        let window_width = self.menu_width;
+        let mut hide = false;
         ui.window(im_str!("State"))
             .size(
                 (window_width, frame_size.logical_size.1 as f32),
                 ImGuiCond::Always,
             )
             .position((0.0, 0.0), ImGuiCond::Always)
-            .collapsible(false)
+            .collapsible(true)
             .movable(false)
             .resizable(false)
             .build(|| {
@@ -278,11 +423,16 @@ impl GlobalState {
                 let button_y = 30.0;
                 self.build_projection_options(ui, (button_size, button_y), 12.0);
                 self.build_variable_sliders(ui, button_size * 2.0 + 4.0);
-                ui.separator();
-                ui.text("Select value to display");
-                ui.spacing();
-                self.build_value_selector(ui, window_width);
-            })
+                if ui.button(im_str!("Reset Time"), (100.0, 40.0)) {
+                    self.reset_time_values();
+                }
+                ui.same_line_spacing(100.0, 12.0);
+                self.build_window_combiner(ui, (100.0, 40.0));
+                if ui.button(im_str!("Hide All"), (100.0, 40.0)) {
+                    hide = true;
+                }
+            });
+        self.build_viewport_uis(ui);
     }
 
     fn build_projection_options(&mut self, ui: &Ui, size: (f32, f32), spacing: f32) {
@@ -316,15 +466,31 @@ impl GlobalState {
         });
     }
 
-    fn build_value_selector(&mut self, ui: &Ui, window_width: f32) {
+    fn build_value_selector(&mut self, ui: &Ui, window_width: f32, to_select: &mut i32) {
         for (i, value) in self.values.iter().enumerate() {
-            ui.radio_button(value.name.as_ref(), &mut self.selected, i as i32);
+            ui.radio_button(value.name.as_ref(), to_select, i as i32);
         }
-        let selected = &mut self.values[self.selected as usize];
+        let selected = &mut self.values[*to_select as usize];
         ui.spacing();
         ui.separator();
         ui.text(&selected.name);
         selected.build_ui_elements(ui, window_width);
+    }
+
+    fn build_window_combiner(&mut self, ui: &Ui, size: (f32, f32)) {
+        let mut rebuild = false;
+        if ui.button(im_str!("Undo Split"), size) {
+            let id = match self.division_order.pop() {
+                Some(id) => id,
+                None => return,
+            };
+            let division = self.divisions[id].unwrap();
+            division.remove_division(&mut self.divisions);
+            rebuild = true;
+        }
+        if rebuild {
+            self.rebuild_viewports();
+        }
     }
 }
 
@@ -343,6 +509,7 @@ struct Value {
     tex_indices: Vec<usize>,
     selection: f32,
     time: bool,
+    time_updated: bool,
 }
 
 impl Value {
@@ -408,7 +575,7 @@ impl Value {
         }
     }
 
-    pub fn get_selected(&self) -> (usize, usize, f32) {
+    pub fn get_textures(&self) -> (usize, usize, f32) {
         let mut ceil = self.selection.ceil() as usize;
         if ceil >= self.tex_indices.len() {
             ceil = 0;

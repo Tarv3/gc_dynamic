@@ -14,30 +14,25 @@ mod state;
 mod support;
 mod util;
 mod window;
+mod evec;
+mod viewports;
 
 use glium::backend::glutin::Display;
-use glium::index::{NoIndices, PrimitiveType::TrianglesList};
-use glium::texture::{texture2d::Texture2d, RawImage2d};
-use glium::uniforms::EmptyUniforms;
 use glium::{
     draw_parameters::BackfaceCullingMode, glutin::EventsLoop, DrawParameters, Program, Surface,
-    VertexBuffer,
 };
 use heat_map::math::Range;
 use imgui::ImString;
 use renderer::{
-    camera::{PCamera, Projection}, test, Vec3, PV,
+    camera::{PCamera, Projection}, Vec3, PV,
 };
-use sphere::Sphere;
 use state::{GlobalState, Measurement};
 use std::f32::consts::PI;
-use std::path::Path;
-use support::load_image;
 use util::*;
 use window::Window;
 
 fn build_state(display: &Display) -> GlobalState {
-    let mut camera = PCamera::new(
+    let camera = PCamera::new(
         Vec3::new(0.0, 0.0, 4.0),
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(0.0, 1.0, 0.0),
@@ -68,8 +63,10 @@ fn build_state(display: &Display) -> GlobalState {
     let mut glstate = GlobalState::new_default_tex(
         display,
         camera,
+        "assets/whms.png",
+        "assets/Pure B and W Map.png",
         ImString::new("World Map"),
-        "assets/huge height.jpg",
+        "assets/map_pic.jpg",
         hsv_program,
         colour_program,
     ).unwrap();
@@ -121,10 +118,13 @@ fn main() {
             glstate.handle_mouse(mouse, hidpi);
             for event in events {
                 input::handle_input(event, &mut glstate.camera);
+                if let Some(resized) = input::get_resized(event) {
+                    glstate.handle_resize(resized);
+                }
             }
 
             target.clear_color_and_depth((1.0, 1.0, 1.0, 0.0), 1.0);
-            glstate.draw_globe(target, &draw_parameters, *identity.as_ref());
+            glstate.render_viewports(target, *identity.as_ref());
             true
         },
     );

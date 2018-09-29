@@ -1,7 +1,4 @@
-use glium::glutin::{
-    ElementState, Event, GlWindow, KeyboardInput, MouseButton, MouseScrollDelta, VirtualKeyCode,
-    WindowEvent,
-};
+use glium::glutin::{ElementState, Event, GlWindow, MouseButton, MouseScrollDelta, WindowEvent};
 use imgui::{ImGui, Ui};
 use renderer::camera::PCamera;
 use renderer::Vec2;
@@ -13,6 +10,16 @@ pub fn handle_input(event: &Event, camera: &mut PCamera) {
             _ => (),
         },
         _ => (),
+    }
+}
+
+pub fn get_resized(event: &Event) -> Option<(f64, f64)> {
+    match event {
+        Event::WindowEvent { event, .. } => match event {
+            WindowEvent::Resized(value) => Some((*value).into()),
+            _ => None,
+        },
+        _ => None,
     }
 }
 

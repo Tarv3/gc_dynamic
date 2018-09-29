@@ -4,8 +4,7 @@ use glium::{
     glutin::{ElementState, Event, EventsLoop, VirtualKeyCode, WindowEvent}, Frame,
 };
 use image;
-use imgui::*;
-use imgui::{FrameSize, ImGui, ImGuiKey, ImVec4, Ui};
+use imgui::{FrameSize, ImGui, ImGuiKey, Ui};
 use imrender::Renderer;
 use input::MouseState;
 use std::path::Path;
@@ -24,6 +23,7 @@ fn build_imgui(window: &Window, hidpi_factor: f32) -> (ImGui, Renderer) {
     let imrender =
         Renderer::init(&mut imgui, &window.display).expect("Failed to create imrenderer");
     imgui.set_font_global_scale((1.0 / hidpi_factor) as f32);
+    imgui.set_ini_filename(None);
 
     (imgui, imrender)
 }

@@ -1,7 +1,6 @@
 use glium::{backend::glutin::Display, texture::Texture2d};
 use heat_map;
 use std::path::Path;
-use support::load_image;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Vertex {
@@ -48,7 +47,7 @@ pub fn minf32(value: f32, min: f32) -> f32 {
     }
 }
 
-pub fn maxf32(value: f32, max: f32) -> f32 {
+pub fn _maxf32(value: f32, max: f32) -> f32 {
     if value > max || value.is_nan() || value.is_infinite() {
         max
     } else {
