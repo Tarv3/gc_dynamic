@@ -176,9 +176,9 @@ impl GlobalState {
             let drag_x = clampf32(self.zoom.get_scale() * drag.x, -abs_x, abs_x);
             let drag_y = clampf32(self.zoom.get_scale() * drag.y, -abs_y, abs_y);
             self.camera
-                .rotate_around_look_horizontal(-drag_x * self.variables.drag_speed * hidpi);
+                .rotate_around_look_horizontal(-drag_x * self.variables.drag_speed / hidpi);
             self.camera
-                .rotate_around_look_vertical(drag_y * self.variables.drag_speed * hidpi);
+                .rotate_around_look_vertical(drag_y * self.variables.drag_speed / hidpi);
         }
         if !mouse.on_ui {
             self.zoom.add_zoom(-mouse.mouse.wheel);
