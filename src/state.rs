@@ -290,7 +290,6 @@ impl GlobalState {
             };
 
             let index = viewport.div_id;
-            // Not this
             let index = self.divisions[index].unwrap().get_selected() as usize;
             let view_matrix = viewport.view_matrix(&self.camera, self.zoom.get_scale());
             self.draw_globe(
@@ -313,7 +312,11 @@ impl GlobalState {
     ) {
         let (tex1, tex2, interp) = self.get_selected_textures(index).unwrap();
         match self.is_selected_measurement(index) {
-            Measurement::Is { init_range, range } => {
+            Measurement::Is {
+                normalised,
+                init_range,
+                range,
+            } => {
                 let uniforms = uniform! {
                     overlay: &self.overlay,
                     colour_map1: tex1,
@@ -321,6 +324,7 @@ impl GlobalState {
                     interpolation: interp,
                     init_range: init_range,
                     range: range,
+                    normalised: normalised,
                     view: view_matrix,
                     eye: *self.camera.position.coords.as_ref(),
                     rotation: model_matrix,
@@ -362,7 +366,7 @@ impl GlobalState {
 
     pub fn build_viewport_uis(&mut self, ui: &Ui) {
         let frame_size = ui.frame_size().logical_size;
-        let window_width = self.menu_width - 50.0;
+        let window_width = self.menu_width - 100.0;
         let mut viewports = vec![];
         let mut divisions = Evec::new();
         let mut rebuild = false;
@@ -372,7 +376,10 @@ impl GlobalState {
             let rect = viewport.glium_vp_logicalsize(frame_size);
             let string = ImString::new(format!("Viewport {}", i));
             ui.window(string.as_ref())
-                .size((window_width, rect.height as f32), ImGuiCond::Always)
+                .size(
+                    (window_width, _maxf32(rect.height as f32, 400.0)),
+                    ImGuiCond::Always,
+                )
                 .position(
                     (
                         rect.left as f32,
@@ -397,7 +404,7 @@ impl GlobalState {
                         self.division_order.push(div.get_id());
                         rebuild = true;
                     }
-                    ui.same_line_spacing(button_size.0, 10.0);
+                    ui.same_line_spacing(button_size.0, 12.0);
                     if ui.button(horizontal.as_ref(), button_size) {
                         div.divide(DivDirection::Horizontal(0.5), &mut divisions);
                         self.division_order.push(div.get_id());
@@ -405,7 +412,6 @@ impl GlobalState {
                     }
                     if let Some(parent) = div.get_parent() {
                         let collapse = ImString::new(format!("Collapse ##{}", i));
-                        ui.same_line_spacing(button_size.0 * 2.0, 12.0);
                         if ui.button(collapse.as_ref(), button_size) {
                             let parent = divisions[parent].unwrap();
                             parent.remove_division(&mut divisions, div.get_selected());
@@ -506,6 +512,7 @@ impl GlobalState {
 pub enum Measurement {
     IsNot,
     Is {
+        normalised: [f32; 2],
         init_range: [f32; 2],
         range: [f32; 2],
     },
@@ -557,6 +564,7 @@ impl Value {
         if let Measurement::Is {
             init_range: [min, max],
             range: ref mut value,
+            ..
         } = self.measurement
         {
             let range = max - min;

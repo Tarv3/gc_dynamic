@@ -30,6 +30,7 @@ use state::{GlobalState, Measurement};
 use std::f32::consts::PI;
 use util::*;
 use window::Window;
+use support::load_image;
 
 fn build_state(display: &Display) -> GlobalState {
     let camera = PCamera::new(
@@ -70,11 +71,23 @@ fn build_state(display: &Display) -> GlobalState {
         hsv_program,
         colour_program,
     ).unwrap();
+    let height = vec![load_image(display, "assets/whms.png")];
 
+    glstate.add_new_value(
+        height,
+        ImString::new("Height"),
+        Measurement::Is {
+            normalised: [0.0, 1.0],
+            init_range: [0.0, 1.0],
+            range: [0.0, 1.0]
+        },
+    );
+    
     glstate.add_new_value(
         avg,
         ImString::new("Average Temperature"),
         Measurement::Is {
+            normalised: [0.5, 1.0],
             init_range: monthly_range,
             range: monthly_range,
         },
@@ -83,6 +96,7 @@ fn build_state(display: &Display) -> GlobalState {
         monthly_values,
         ImString::new("Monthly Temperature"),
         Measurement::Is {
+            normalised: [0.5, 1.0],
             init_range: monthly_range,
             range: monthly_range,
         },

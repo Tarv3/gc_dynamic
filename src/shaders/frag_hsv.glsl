@@ -7,6 +7,7 @@ uniform sampler2D colour_map2;
 uniform float interpolation;
 uniform vec2 init_range;
 uniform vec2 range;
+uniform vec2 normalised;
 
 in vec3 f_normal;
 in vec2 f_tex;
@@ -65,8 +66,9 @@ void main() {
     vec4 image_colour1 = texelFetch(colour_map1, coords1, 0);
     vec4 image_colour2 = texelFetch(colour_map2, coords2, 0);
     vec4 overlay_colour = texelFetch(overlay, overlay_coords, 0);
-    float c1 = clamp(image_colour1.x * 2.0 - 1.0, 0.0, 1.0);
-    float c2 = clamp(image_colour2.x * 2.0 - 1.0, 0.0, 1.0);
+    float difference = normalised.y - normalised.x;
+    float c1 = clamp((image_colour1.x - normalised.x) / difference, 0.0, 1.0);
+    float c2 = clamp((image_colour2.x - normalised.x) / difference, 0.0, 1.0);
     c1 = new_range(init_range, range, c1);
     c2 = new_range(init_range, range, c2);
 
