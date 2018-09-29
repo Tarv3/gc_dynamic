@@ -108,6 +108,7 @@ fn build_state(display: &Display) -> GlobalState {
 fn main() {
     let mut events_loop = EventsLoop::new();
     let mut window = Window::new(false, true, true, [900.0, 900.0], &events_loop);
+    let hidpi = window.display.gl_window().get_hidpi_factor() as f32;
     
     let mut glstate = build_state(&window.display);
     let identity: na::Matrix4<f32> = na::Matrix4::identity();
@@ -126,14 +127,13 @@ fn main() {
         &mut window,
         &mut events_loop,
         |target, ui, mouse, events, dt| {
-            let hidpi = ui.frame_size().hidpi_factor as f32;
             glstate.update_time(dt);
             glstate.build_ui(ui);
             glstate.handle_mouse(mouse, hidpi);
             for event in events {
                 input::handle_input(event, &mut glstate.camera);
                 if let Some(resized) = input::get_resized(event) {
-                    glstate.handle_resize(resized);
+                    glstate.handle_resize(resized, hidpi);
                 }
             }
 

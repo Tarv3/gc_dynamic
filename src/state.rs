@@ -185,7 +185,7 @@ impl GlobalState {
         }
     }
 
-    pub fn handle_resize(&mut self, resized: (f64, f64)) {
+    pub fn handle_resize(&mut self, resized: (f64, f64), hidpi: f32) {
         let (x, y) = (resized.0 as f32, resized.1 as f32);
         let new_left = self.menu_width / x;
         self.main_viewport.left = new_left;
