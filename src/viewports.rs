@@ -56,9 +56,11 @@ impl DivDirection {
 pub enum Division {
     None {
         selected: i32,
+        parent: Option<usize>,
         id: usize,
     },
     Ratio {
+        parent: Option<usize>,
         id: usize,
         direction: DivDirection,
         a: usize,
@@ -79,7 +81,12 @@ impl Division {
             Division::Ratio { .. } => true,
         }
     }
-
+    pub fn get_parent(&self) -> Option<usize> {
+        match self {
+            Division::None { parent, .. } => *parent,
+            Division::Ratio { parent, .. } => *parent,
+        }
+    }
     pub fn build_viewports(
         &self,
         rect: ViewRect,
@@ -87,7 +94,7 @@ impl Division {
         viewports: &mut Vec<ViewPort>,
     ) {
         match self {
-            Division::None { selected, id } => {
+            Division::None { selected, id, .. } => {
                 viewports.push(ViewPort { div_id: *id, rect });
             }
             Division::Ratio {
@@ -109,7 +116,7 @@ impl Division {
         viewports: &mut Vec<ViewPort>,
     ) {
         match self {
-            Division::None { selected, id } => {
+            Division::None { selected, id, .. } => {
                 viewports.push(ViewPort { div_id: *id, rect });
             }
             Division::Ratio {
@@ -124,19 +131,24 @@ impl Division {
         }
     }
 
-    pub fn remove_division(&self, divisions: &mut Evec<Division>) {
+    pub fn remove_division(&self, divisions: &mut Evec<Division>, selected: i32) {
         match self {
-            Division::Ratio { a, b, id, .. } => {
-                let mut selected = 0;
+            Division::Ratio {
+                a, b, id, parent, ..
+            } => {
                 if let Some(div) = divisions[*a] {
-                    div.remove_division(divisions);
+                    div.remove_division(divisions, selected);
                 }
                 if let Some(div) = divisions[*b] {
-                    div.remove_division(divisions);
+                    div.remove_division(divisions, selected);
                 }
                 divisions.remove(*a);
                 divisions.remove(*b);
-                divisions[*id] = Some(Division::None { id: *id, selected })
+                divisions[*id] = Some(Division::None {
+                    parent: *parent,
+                    id: *id,
+                    selected,
+                })
             }
             _ => (),
         }
@@ -144,21 +156,24 @@ impl Division {
 
     pub fn divide(&self, dir: DivDirection, divisions: &mut Evec<Division>) {
         match self {
-            Division::None { id, selected } => {
+            Division::None { id, selected, .. } => {
                 let a_index = divisions.next_available();
                 let a = Division::None {
+                    parent: Some(*id),
                     id: a_index,
                     selected: *selected,
                 };
                 divisions.push(a);
                 let b_index = divisions.next_available();
                 let b = Division::None {
+                    parent: Some(*id),
                     id: b_index,
                     selected: *selected,
                 };
                 divisions.push(b);
                 if let Some(ref mut div) = divisions[*id] {
                     *div = Division::Ratio {
+                        parent: div.get_parent(),
                         id: *id,
                         direction: dir,
                         a: a_index,
@@ -261,13 +276,22 @@ impl ViewPort {
         projection.zoomed_matrix(zoom) * camera.look_at_matrix()
     }
 
-    pub fn get_div_selection(&self, divisions: &[Option<Division>]) -> i32 {
-        divisions[self.div_id].unwrap().get_selected()
+    pub fn get_div_selection(&self, divisions: &[Option<Division>]) -> Option<i32> {
+        let value = divisions[self.div_id];
+        match value {
+            Some(div) => Some(div.get_selected()),
+            None => None,
+        }
     }
+
     pub fn get_div_selection_mut<'a>(
         &'a self,
         divisions: &'a mut [Option<Division>],
-    ) -> &'a mut i32 {
-        divisions[self.div_id].as_mut().unwrap().get_selected_mut()
+    ) -> Option<&'a mut i32> {
+        let value = divisions[self.div_id].as_mut();
+        match value {
+            Some(div) => Some(div.get_selected_mut()),
+            None => None,
+        }
     }
 }

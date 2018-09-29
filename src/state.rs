@@ -115,7 +115,11 @@ impl GlobalState {
             bottom: 0.0,
             top: 1.0,
         };
-        let division = Division::None { selected: 0, id: 0 };
+        let division = Division::None {
+            selected: 0,
+            id: 0,
+            parent: None,
+        };
         let divisions = Evec::from(vec![division]);
 
         let mut viewports = vec![];
@@ -228,7 +232,10 @@ impl GlobalState {
         let mut viewports = vec![];
         mem::swap(&mut viewports, &mut self.viewports);
         for viewport in &viewports {
-            let index = viewport.get_div_selection(&self.divisions.values) as usize;
+            let index = match viewport.get_div_selection(&self.divisions.values) {
+                Some(index) => index as usize,
+                None => continue,
+            };
             let value = match self.get_selected_mut(index) {
                 Some(value) => value,
                 None => return,
@@ -283,6 +290,7 @@ impl GlobalState {
             };
 
             let index = viewport.div_id;
+            // Not this
             let index = self.divisions[index].unwrap().get_selected() as usize;
             let view_matrix = viewport.view_matrix(&self.camera, self.zoom.get_scale());
             self.draw_globe(
@@ -354,7 +362,7 @@ impl GlobalState {
 
     pub fn build_viewport_uis(&mut self, ui: &Ui) {
         let frame_size = ui.frame_size().logical_size;
-        let window_width = self.menu_width - 100.0;
+        let window_width = self.menu_width - 50.0;
         let mut viewports = vec![];
         let mut divisions = Evec::new();
         let mut rebuild = false;
@@ -376,24 +384,44 @@ impl GlobalState {
                 .movable(false)
                 .resizable(false)
                 .build(|| {
-                    ui.text("Select value to display");
-                    ui.spacing();
-                    {
-                        let div = viewport.get_div_selection_mut(&mut divisions.values);
-                        self.build_value_selector(ui, window_width, div);
-                    }
+                    ui.text("Split");
+                    let button_size = (80.0, 40.0);
                     let vert = ImString::new(format!("Vertical ##{}", i));
                     let horizontal = ImString::new(format!("Horizontal ##{}", i));
-                    let div = divisions[viewport.div_id].unwrap();
-                    if ui.button(vert.as_ref(), (80.0, 40.0)) {
+                    let div = match divisions[viewport.div_id] {
+                        Some(div) => div,
+                        None => return,
+                    };
+                    if ui.button(vert.as_ref(), button_size) {
                         div.divide(DivDirection::Verticle(0.5), &mut divisions);
                         self.division_order.push(div.get_id());
                         rebuild = true;
                     }
-                    if ui.button(horizontal.as_ref(), (80.0, 40.0)) {
+                    ui.same_line_spacing(button_size.0, 10.0);
+                    if ui.button(horizontal.as_ref(), button_size) {
                         div.divide(DivDirection::Horizontal(0.5), &mut divisions);
                         self.division_order.push(div.get_id());
                         rebuild = true;
+                    }
+                    if let Some(parent) = div.get_parent() {
+                        let collapse = ImString::new(format!("Collapse ##{}", i));
+                        ui.same_line_spacing(button_size.0 * 2.0, 12.0);
+                        if ui.button(collapse.as_ref(), button_size) {
+                            let parent = divisions[parent].unwrap();
+                            parent.remove_division(&mut divisions, div.get_selected());
+                            rebuild = true;
+                        }
+                    }
+
+                    if !rebuild {
+                        ui.separator();
+                        ui.text("Select value to display");
+                        ui.spacing();
+                        let div = match viewport.get_div_selection_mut(&mut divisions.values) {
+                            Some(val) => val,
+                            None => return,
+                        };
+                        self.build_value_selector(ui, window_width, div);
                     }
                 });
         }
@@ -427,10 +455,6 @@ impl GlobalState {
                     self.reset_time_values();
                 }
                 ui.same_line_spacing(100.0, 12.0);
-                self.build_window_combiner(ui, (100.0, 40.0));
-                if ui.button(im_str!("Hide All"), (100.0, 40.0)) {
-                    hide = true;
-                }
             });
         self.build_viewport_uis(ui);
     }
@@ -475,22 +499,6 @@ impl GlobalState {
         ui.separator();
         ui.text(&selected.name);
         selected.build_ui_elements(ui, window_width);
-    }
-
-    fn build_window_combiner(&mut self, ui: &Ui, size: (f32, f32)) {
-        let mut rebuild = false;
-        if ui.button(im_str!("Undo Split"), size) {
-            let id = match self.division_order.pop() {
-                Some(id) => id,
-                None => return,
-            };
-            let division = self.divisions[id].unwrap();
-            division.remove_division(&mut self.divisions);
-            rebuild = true;
-        }
-        if rebuild {
-            self.rebuild_viewports();
-        }
     }
 }
 
