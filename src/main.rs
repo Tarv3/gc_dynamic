@@ -127,9 +127,10 @@ fn main() {
         &mut window,
         &mut events_loop,
         |target, ui, mouse, events, dt| {
+            let dims = target.get_dimensions();
             glstate.update_time(dt);
             glstate.build_ui(ui);
-            glstate.handle_mouse(mouse, hidpi);
+            glstate.handle_mouse(mouse, dims, hidpi);
             for event in events {
                 input::handle_input(event, &mut glstate.camera);
                 if let Some(resized) = input::get_resized(event) {

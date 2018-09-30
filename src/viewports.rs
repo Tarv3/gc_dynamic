@@ -198,6 +198,13 @@ impl Division {
             Division::Ratio { .. } => panic!("Tried to get selected from a division"),
         }
     }
+
+    pub fn get_children(&self) -> (usize, usize) {
+        match self {
+            Division::Ratio { a, b, .. } => (*a, *b),
+            _ => panic!("Tried to get children from none"),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -228,6 +235,13 @@ impl ViewRect {
 
     fn aspect_ratio(&self) -> f32 {
         self.width() / self.height()
+    }
+
+    pub fn contains(&self, pos: [f32; 2]) -> bool {
+        let x = pos[0];
+        let y = pos[1];
+
+        x < self.right && x > self.left && y < self.top && y > self.bottom
     }
 }
 
@@ -293,5 +307,9 @@ impl ViewPort {
             Some(div) => Some(div.get_selected_mut()),
             None => None,
         }
+    }
+
+    pub fn can_render(&self) -> bool {
+        self.rect.left < self.rect.right && self.rect.bottom < self.rect.top
     }
 }

@@ -9,6 +9,7 @@ use imgui::*;
 use input::MouseState;
 use renderer::camera::PCamera;
 use sphere::Sphere;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::mem;
 use std::path::Path;
@@ -61,7 +62,7 @@ pub struct GlobalState {
     main_viewport: ViewRect,
     divisions: Evec<Division>,
     viewports: Vec<ViewPort>,
-    division_order: Vec<usize>,
+    viewport_cameras: BTreeMap<usize, PCamera>,
 
     height_map: Texture2d,
     overlay: Texture2d,
@@ -71,6 +72,9 @@ pub struct GlobalState {
     selected: i32,
     variables: StateVariables,
     menu_width: f32,
+
+    m1_pressed: bool,
+    viewport_pressed: Option<usize>,
 }
 
 impl GlobalState {
@@ -110,7 +114,7 @@ impl GlobalState {
             drag_speed: 0.02,
         };
         let main_viewport = ViewRect {
-            left: 0.33,
+            left: 0.3333,
             right: 1.0,
             bottom: 0.0,
             top: 1.0,
@@ -135,7 +139,7 @@ impl GlobalState {
             main_viewport,
             divisions,
             viewports,
-            division_order: vec![],
+            viewport_cameras: BTreeMap::new(),
 
             height_map: load_image(window, height),
             overlay: load_image(window, overlay),
@@ -145,6 +149,8 @@ impl GlobalState {
             selected: 0,
             variables,
             menu_width: 300.0,
+            m1_pressed: false,
+            viewport_pressed: None,
         })
     }
 
@@ -169,19 +175,61 @@ impl GlobalState {
         self.textures.append(&mut new_textures);
     }
 
-    pub fn handle_mouse(&mut self, mouse: &MouseState, hidpi: f32) {
+    pub fn handle_mouse(&mut self, mouse: &MouseState, dimensions: (u32, u32), hidpi: f32) {
+        let m1 = mouse.mouse.pressed.0;
+        if !mouse.on_ui {
+            self.zoom.add_zoom(-mouse.mouse.wheel);
+            if m1 && !self.m1_pressed {
+                let pos = *mouse.mouse.position.as_ref();
+                let x = pos[0] / dimensions.0 as f32;
+                let y = 1.0 - pos[1] / dimensions.1 as f32;
+                self.viewport_pressed = self.on_viewport([x, y]);
+            } else if !m1 && self.m1_pressed {
+                self.viewport_pressed = None;
+            }
+        }
         if let Some(drag) = mouse.get_drag_off_ui() {
             let abs_x = drag.x.abs();
             let abs_y = drag.y.abs();
             let drag_x = clampf32(self.zoom.get_scale() * drag.x, -abs_x, abs_x);
             let drag_y = clampf32(self.zoom.get_scale() * drag.y, -abs_y, abs_y);
-            self.camera
-                .rotate_around_look_horizontal(-drag_x * self.variables.drag_speed / hidpi);
-            self.camera
-                .rotate_around_look_vertical(drag_y * self.variables.drag_speed / hidpi);
+            let drag_speed = self.variables.drag_speed;
+            let camera = match self.viewport_pressed {
+                Some(id) => self.get_viewport_cam_mut(id),
+                None => &mut self.camera,
+            };
+            camera.rotate_around_look_horizontal(-drag_x * drag_speed / hidpi);
+            camera.rotate_around_look_vertical(drag_y * drag_speed / hidpi);
         }
-        if !mouse.on_ui {
-            self.zoom.add_zoom(-mouse.mouse.wheel);
+
+        self.m1_pressed = m1;
+    }
+
+    fn get_viewport_cam_mut(&mut self, id: usize) -> &mut PCamera {
+        match id < self.viewports.len() {
+            true => {
+                let viewport = &self.viewports[id];
+                let index = viewport.div_id;
+                match self.viewport_cameras.get_mut(&index) {
+                    Some(cam) => cam,
+                    None => &mut self.camera,
+                }
+            }
+            false => &mut self.camera,
+        }
+    }
+
+    fn get_viewport_cam(&mut self, id: usize) -> &PCamera {
+        match id < self.viewports.len() {
+            true => {
+                let viewport = &self.viewports[id];
+                let index = viewport.div_id;
+                match self.viewport_cameras.get(&index) {
+                    Some(cam) => cam,
+                    None => &self.camera,
+                }
+            }
+            false => &self.camera,
         }
     }
 
@@ -260,6 +308,15 @@ impl GlobalState {
         }
     }
 
+    pub fn on_viewport(&self, pos: [f32; 2]) -> Option<usize> {
+        for (i, viewport) in self.viewports.iter().enumerate() {
+            if viewport.rect.contains(pos) {
+                return Some(i);
+            }
+        }
+        None
+    }
+
     pub fn rebuild_viewports(&mut self) {
         let division = self.divisions[0].unwrap();
         let main_viewport = self.main_viewport;
@@ -276,7 +333,10 @@ impl GlobalState {
         model_matrix: [[f32; 4]; 4],
     ) {
         let frame = target.get_dimensions();
-        for ref viewport in self.viewports.iter() {
+        for viewport in &self.viewports {
+            if !viewport.can_render() {
+                continue;
+            }
             let rect = viewport.glium_viewport(frame);
             let draw_parameters = DrawParameters {
                 depth: glium::Depth {
@@ -289,9 +349,13 @@ impl GlobalState {
                 ..Default::default()
             };
 
-            let index = viewport.div_id;
-            let index = self.divisions[index].unwrap().get_selected() as usize;
-            let view_matrix = viewport.view_matrix(&self.camera, self.zoom.get_scale());
+            let id = viewport.div_id;
+            let index = self.divisions[id].unwrap().get_selected() as usize;
+            let camera = match self.viewport_cameras.get(&id) {
+                Some(camera) => camera,
+                None => &self.camera,
+            };
+            let view_matrix = viewport.view_matrix(camera, self.zoom.get_scale());
             self.draw_globe(
                 index,
                 target,
@@ -374,61 +438,27 @@ impl GlobalState {
         mem::swap(&mut divisions, &mut self.divisions);
         for (i, viewport) in viewports.iter().enumerate() {
             let rect = viewport.glium_vp_logicalsize(frame_size);
+            let x = rect.left as f32;
+            let y = frame_size.1 as f32 - (rect.bottom + rect.height) as f32;
             let string = ImString::new(format!("Viewport {}", i));
             ui.window(string.as_ref())
                 .size(
                     (window_width, _maxf32(rect.height as f32, 400.0)),
                     ImGuiCond::Always,
                 )
-                .position(
-                    (
-                        rect.left as f32,
-                        frame_size.1 as f32 - (rect.bottom + rect.height) as f32,
-                    ),
-                    ImGuiCond::Always,
-                )
+                .position((x, y), ImGuiCond::Always)
                 .collapsible(true)
                 .movable(false)
                 .resizable(false)
                 .build(|| {
-                    ui.text("Split");
-                    let button_size = (80.0, 40.0);
-                    let vert = ImString::new(format!("Vertical ##{}", i));
-                    let horizontal = ImString::new(format!("Horizontal ##{}", i));
-                    let div = match divisions[viewport.div_id] {
-                        Some(div) => div,
-                        None => return,
-                    };
-                    if ui.button(vert.as_ref(), button_size) {
-                        div.divide(DivDirection::Verticle(0.5), &mut divisions);
-                        self.division_order.push(div.get_id());
-                        rebuild = true;
-                    }
-                    ui.same_line_spacing(button_size.0, 12.0);
-                    if ui.button(horizontal.as_ref(), button_size) {
-                        div.divide(DivDirection::Horizontal(0.5), &mut divisions);
-                        self.division_order.push(div.get_id());
-                        rebuild = true;
-                    }
-                    if let Some(parent) = div.get_parent() {
-                        let collapse = ImString::new(format!("Collapse ##{}", i));
-                        if ui.button(collapse.as_ref(), button_size) {
-                            let parent = divisions[parent].unwrap();
-                            parent.remove_division(&mut divisions, div.get_selected());
-                            rebuild = true;
-                        }
-                    }
-
-                    if !rebuild {
-                        ui.separator();
-                        ui.text("Select value to display");
-                        ui.spacing();
-                        let div = match viewport.get_div_selection_mut(&mut divisions.values) {
-                            Some(val) => val,
-                            None => return,
-                        };
-                        self.build_value_selector(ui, window_width, div);
-                    }
+                    self.build_viewport_ui(
+                        ui,
+                        window_width,
+                        i,
+                        viewport,
+                        &mut divisions,
+                        &mut rebuild,
+                    );
                 });
         }
         mem::swap(&mut viewports, &mut self.viewports);
@@ -436,6 +466,76 @@ impl GlobalState {
 
         if rebuild {
             self.rebuild_viewports();
+        }
+    }
+
+    fn build_viewport_ui(
+        &mut self,
+        ui: &Ui,
+        window_width: f32,
+        i: usize,
+        viewport: &ViewPort,
+        divisions: &mut Evec<Division>,
+        rebuild: &mut bool,
+    ) {
+        ui.text("Split");
+        let button_size = (80.0, 40.0);
+        let vert = ImString::new(format!("Vertical ##{}", i));
+        let horizontal = ImString::new(format!("Horizontal ##{}", i));
+        let id = viewport.div_id;
+        let div = match divisions[id] {
+            Some(div) => div,
+            None => return,
+        };
+        if ui.button(vert.as_ref(), button_size) {
+            div.divide(DivDirection::Verticle(0.5), divisions);
+            *rebuild = true;
+        }
+        ui.same_line_spacing(button_size.0, 12.0);
+        if ui.button(horizontal.as_ref(), button_size) {
+            div.divide(DivDirection::Horizontal(0.5), divisions);
+            *rebuild = true;
+        }
+        if let Some(parent) = div.get_parent() {
+            let collapse = ImString::new(format!("Collapse ##{}", i));
+            if ui.button(collapse.as_ref(), button_size) {
+                let parent = divisions[parent].unwrap();
+                let (a, b) = parent.get_children(); 
+                let pid = parent.get_id();
+                parent.remove_division(divisions, div.get_selected());
+
+                if let Some(camera) = self.viewport_cameras.remove(&id) {
+                    self.viewport_cameras.insert(pid, camera);
+                }
+                match id == a {
+                    true => self.viewport_cameras.remove(&b),
+                    false => self.viewport_cameras.remove(&a)
+                };
+                *rebuild = true;
+            }
+        }
+
+        if self.viewport_cameras.get(&id).is_some() {
+            if ui.small_button(im_str!("Lock")) {
+                self.viewport_cameras.remove(&id);
+            }
+        }
+        else {
+            if ui.small_button(im_str!("UnLock")) {
+                let camera = self.camera;
+                self.viewport_cameras.insert(id, camera);
+            }
+        }
+
+        if !*rebuild {
+            ui.separator();
+            ui.text("Select value to display");
+            ui.spacing();
+            let div = match viewport.get_div_selection_mut(&mut divisions.values) {
+                Some(val) => val,
+                None => return,
+            };
+            self.build_value_selector(ui, window_width, div);
         }
     }
 
@@ -461,6 +561,9 @@ impl GlobalState {
                     self.reset_time_values();
                 }
                 ui.same_line_spacing(100.0, 12.0);
+                if ui.button(im_str!("Lock All"), (100.0, 40.0)) {
+                    self.viewport_cameras.clear();
+                }
             });
         self.build_viewport_uis(ui);
     }
