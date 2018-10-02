@@ -1,6 +1,5 @@
 /target
 **/*.rs.bk
-Cargo.lock
 /AvgTemp -20_30.png
 /blue.png
 /brick_normal.png

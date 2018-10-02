@@ -11,13 +11,36 @@ pub struct Vertex {
 
 implement_vertex!(Vertex, position, normal, tex_coord);
 
-pub fn load_monthly_values(
+pub fn load_temp_grid(
+    path: impl AsRef<Path>,
+) -> heat_map::grid::Grid<Option<heat_map::data::YearlyData<f32>>> {
+        heat_map::grid::Grid::load_from_bin(path).unwrap()
+}
+
+pub fn load_temp_values(
     display: &Display,
     path: impl AsRef<Path>,
     range: heat_map::math::Range<f32>,
-) -> (Vec<Texture2d>, Vec<Texture2d>) {
+    std_range: heat_map::math::Range<f32>,
+) -> (Vec<Texture2d>, Vec<Texture2d>, Vec<Texture2d>) {
     let temp_grid: heat_map::grid::Grid<Option<heat_map::data::YearlyData<f32>>> =
         heat_map::grid::Grid::load_from_bin(path).unwrap();
+
+    let monthly_temps = load_monthly_values(display, &temp_grid, range);
+    let avg_temp = vec![
+        load_yearly_average(display, &temp_grid, range)
+    ];
+    let stddev = vec![
+        load_yearly_stddev(display, &temp_grid, std_range)
+    ];
+    (avg_temp, monthly_temps, stddev)
+}
+
+pub fn load_monthly_values(
+    display: &Display,
+    temp_grid: &heat_map::grid::Grid<Option<heat_map::data::YearlyData<f32>>>,
+    range: heat_map::math::Range<f32>,
+) -> Vec<Texture2d> {
     let mut textures = Vec::with_capacity(12);
 
     for i in 0..12 {
@@ -28,15 +51,35 @@ pub fn load_monthly_values(
         let (texture, _) = month.into_texture(display, Some(range));
         textures.push(texture);
     }
-    let avg_temp = vec![
-        temp_grid
-            .into_grid_with(|temp| match temp {
-                Some(data) => data.yearly_average(),
-                None => None,
-            })
-            .into_texture(display, Some(range)).0,
-    ];
-    (avg_temp, textures)
+    textures
+}
+
+pub fn load_yearly_average(
+    display: &Display,
+    temp_grid: &heat_map::grid::Grid<Option<heat_map::data::YearlyData<f32>>>,
+    range: heat_map::math::Range<f32>,
+) -> Texture2d {
+    temp_grid
+        .into_grid_with(|temp| match temp {
+            Some(data) => data.yearly_average(),
+            None => None,
+        })
+        .into_texture(display, Some(range))
+        .0
+}
+
+pub fn load_yearly_stddev(
+    display: &Display,
+    temp_grid: &heat_map::grid::Grid<Option<heat_map::data::YearlyData<f32>>>,
+    range: heat_map::math::Range<f32>,
+) -> Texture2d {
+    temp_grid
+        .into_grid_with(|temp| match temp {
+            Some(data) => data.standard_dev(),
+            None => None,
+        })
+        .into_texture(display, Some(range))
+        .0
 }
 
 pub fn minf32(value: f32, min: f32) -> f32 {

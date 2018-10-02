@@ -13,7 +13,7 @@ impl DivDirection {
     fn divide(&self, rect: ViewRect) -> (ViewRect, ViewRect) {
         match self {
             DivDirection::Verticle(r) => {
-                let vert_mid = (rect.top + rect.bottom) * 0.5;
+                let vert_mid = (rect.top + rect.bottom) * r;
                 let b_rect = ViewRect {
                     left: rect.left,
                     right: rect.right,
@@ -31,7 +31,7 @@ impl DivDirection {
                 (b_rect, t_rect)
             }
             DivDirection::Horizontal(r) => {
-                let horiz_mid = (rect.left + rect.right) * 0.5;
+                let horiz_mid = (rect.left + rect.right) * r;
                 let l_rect = ViewRect {
                     left: rect.left,
                     right: horiz_mid,
@@ -94,7 +94,7 @@ impl Division {
         viewports: &mut Vec<ViewPort>,
     ) {
         match self {
-            Division::None { selected, id, .. } => {
+            Division::None { id, .. } => {
                 viewports.push(ViewPort { div_id: *id, rect });
             }
             Division::Ratio {
@@ -116,7 +116,7 @@ impl Division {
         viewports: &mut Vec<ViewPort>,
     ) {
         match self {
-            Division::None { selected, id, .. } => {
+            Division::None { id, .. } => {
                 viewports.push(ViewPort { div_id: *id, rect });
             }
             Division::Ratio {
@@ -133,22 +133,29 @@ impl Division {
 
     pub fn remove_division(&self, divisions: &mut Evec<Division>, selected: i32) {
         match self {
-            Division::Ratio {
-                a, b, id, parent, ..
-            } => {
-                if let Some(div) = divisions[*a] {
-                    div.remove_division(divisions, selected);
-                }
-                if let Some(div) = divisions[*b] {
-                    div.remove_division(divisions, selected);
-                }
-                divisions.remove(*a);
-                divisions.remove(*b);
+            Division::Ratio { id, parent, .. } => {
+                self.remove_children(divisions);
                 divisions[*id] = Some(Division::None {
                     parent: *parent,
                     id: *id,
                     selected,
                 })
+            }
+            _ => panic!("Tried to remove a none division"),
+        }
+    }
+
+    fn remove_children(&self, divisions: &mut Evec<Division>) {
+        match self {
+            Division::Ratio { a, b, .. } => {
+                if let Some(div) = divisions[*a] {
+                    div.remove_children(divisions);
+                }
+                if let Some(div) = divisions[*b] {
+                    div.remove_children(divisions);
+                }
+                divisions.remove(*a);
+                divisions.remove(*b);
             }
             _ => (),
         }
@@ -185,17 +192,17 @@ impl Division {
         }
     }
 
-    pub fn get_selected(&self) -> i32 {
+    pub fn get_selected(&self) -> Option<i32> {
         match self {
-            Division::None { selected, .. } => *selected,
-            Division::Ratio { .. } => panic!("Tried to get selected from a division"),
+            Division::None { selected, .. } => Some(*selected),
+            Division::Ratio { .. } => None,
         }
     }
 
-    pub fn get_selected_mut(&mut self) -> &mut i32 {
+    pub fn get_selected_mut(&mut self) -> Option<&mut i32> {
         match self {
-            Division::None { selected, .. } => selected,
-            Division::Ratio { .. } => panic!("Tried to get selected from a division"),
+            Division::None { selected, .. } => Some(selected),
+            Division::Ratio { .. } => None,
         }
     }
 
@@ -293,7 +300,7 @@ impl ViewPort {
     pub fn get_div_selection(&self, divisions: &[Option<Division>]) -> Option<i32> {
         let value = divisions[self.div_id];
         match value {
-            Some(div) => Some(div.get_selected()),
+            Some(div) => div.get_selected(),
             None => None,
         }
     }
@@ -304,7 +311,7 @@ impl ViewPort {
     ) -> Option<&'a mut i32> {
         let value = divisions[self.div_id].as_mut();
         match value {
-            Some(div) => Some(div.get_selected_mut()),
+            Some(div) => div.get_selected_mut(),
             None => None,
         }
     }
@@ -312,4 +319,10 @@ impl ViewPort {
     pub fn can_render(&self) -> bool {
         self.rect.left < self.rect.right && self.rect.bottom < self.rect.top
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct VPSettings {
+    pub menu_open: bool,
+    pub cam: Option<PCamera>,
 }

@@ -1,3 +1,6 @@
+// #![windows_subsystem = "windows"]
+#![allow(dead_code)]
+
 #[macro_use]
 extern crate glium;
 extern crate image;
@@ -15,7 +18,6 @@ mod support;
 mod util;
 mod window;
 mod evec;
-mod viewports;
 
 use glium::backend::glutin::Display;
 use glium::{
@@ -55,10 +57,12 @@ fn build_state(display: &Display) -> GlobalState {
     ).unwrap();
 
     let monthly_range = [-40.0, 50.0];
-    let (avg, monthly_values) = load_monthly_values(
+    let stdrange = [0.0, 40.0];
+    let (avg, monthly_values, stddev) = load_temp_values(
         display,
         "assets/tempgrid.bin",
         Range::new(monthly_range[0], monthly_range[1]),
+        Range::new(stdrange[0], stdrange[1]),
     );
 
     let mut glstate = GlobalState::new_default_tex(
@@ -92,6 +96,7 @@ fn build_state(display: &Display) -> GlobalState {
             range: monthly_range,
         },
     );
+
     glstate.add_new_value(
         monthly_values,
         ImString::new("Monthly Temperature"),
@@ -99,6 +104,16 @@ fn build_state(display: &Display) -> GlobalState {
             normalised: [0.5, 1.0],
             init_range: monthly_range,
             range: monthly_range,
+        },
+    );
+
+    glstate.add_new_value(
+        stddev,
+        ImString::new("Standard Deviation"),
+        Measurement::Is {
+            normalised: [0.5, 1.0],
+            init_range: stdrange,
+            range: stdrange,
         },
     );
 
