@@ -64,7 +64,6 @@ pub struct GlobalState {
     main_viewport: ViewRect,
     divisions: Evec<Division>,
     viewports: Vec<ViewPort>,
-    viewport_cameras: BTreeMap<usize, PCamera>,
     vp_settings: BTreeMap<usize, VPSettings>,
 
     height_map: Texture2d,
@@ -152,7 +151,6 @@ impl GlobalState {
             main_viewport,
             divisions,
             viewports,
-            viewport_cameras: BTreeMap::new(),
             vp_settings,
 
             height_map: load_image(window, height),
@@ -377,6 +375,9 @@ impl GlobalState {
     }
 
     pub fn collapse_all(&mut self) {
+        if self.viewports.len() <= 1 {
+            return;
+        }
         let div = self.divisions[0].expect("No first division");
 
         div.remove_division(&mut self.divisions, 0);
@@ -390,6 +391,12 @@ impl GlobalState {
         }
     }
 
+    pub fn lock_globes(&mut self) {
+        for settings in self.vp_settings.values_mut() {
+            settings.cam = None;
+        }
+    }
+
     pub fn rebuild_viewports(&mut self) {
         let division = self.divisions[0].unwrap();
         let main_viewport = self.main_viewport;
@@ -397,13 +404,22 @@ impl GlobalState {
         mem::swap(&mut viewports, &mut self.viewports);
         viewports.clear();
         division.build_viewports_evec(main_viewport, &self.divisions, &mut viewports);
+        let mut settings = BTreeMap::new();
         for viewport in &viewports {
             let id = viewport.div_id;
-            self.vp_settings.entry(id).or_insert(VPSettings {
-                menu_open: true,
-                cam: None,
-            });
+            let value = self.vp_settings.get(&id);
+            match value {
+                Some(value) => settings.insert(id, *value),
+                None => settings.insert(
+                    id,
+                    VPSettings {
+                        menu_open: true,
+                        cam: None,
+                    }
+                ),
+            };
         }
+        self.vp_settings = settings; 
         mem::swap(&mut viewports, &mut self.viewports);
     }
 
@@ -674,7 +690,7 @@ impl GlobalState {
         }
         ui.same_line_spacing(size.0, spacing);
         if ui.button(im_str!("Lock All"), size) {
-            self.viewport_cameras.clear();
+            self.lock_globes();
         }
         if ui.button(im_str!("Pause All"), size) {
             self.set_values_time(false);
