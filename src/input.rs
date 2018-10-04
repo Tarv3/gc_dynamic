@@ -75,7 +75,7 @@ impl MouseState {
             false,
         ]);
         ui.set_mouse_wheel(self.mouse.wheel);
-        ui.set_mouse_pos(self.mouse.position.x, self.mouse.position.y);
+        ui.set_mouse_pos(self.mouse.position.x.round(), self.mouse.position.y.round());
     }
 
     pub fn update_on_ui(&mut self, ui: &Ui) {

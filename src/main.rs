@@ -1,4 +1,4 @@
-// #![windows_subsystem = "windows"]
+#![windows_subsystem = "windows"]
 #![allow(dead_code)]
 
 #[macro_use]
@@ -122,7 +122,7 @@ fn build_state(display: &Display) -> GlobalState {
 
 fn main() {
     let mut events_loop = EventsLoop::new();
-    let mut window = Window::new(false, true, true, [900.0, 900.0], &events_loop);
+    let mut window = Window::new("Climate Visualisation", false, true, true, None, &events_loop);
     let hidpi = window.display.gl_window().get_hidpi_factor() as f32;
     
     let mut glstate = build_state(&window.display);

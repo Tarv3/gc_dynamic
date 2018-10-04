@@ -397,6 +397,10 @@ impl GlobalState {
         }
     }
 
+    pub fn change_projection(&mut self) {
+
+    }
+
     pub fn rebuild_viewports(&mut self) {
         let division = self.divisions[0].unwrap();
         let main_viewport = self.main_viewport;
@@ -415,11 +419,11 @@ impl GlobalState {
                     VPSettings {
                         menu_open: true,
                         cam: None,
-                    }
+                    },
                 ),
             };
         }
-        self.vp_settings = settings; 
+        self.vp_settings = settings;
         mem::swap(&mut viewports, &mut self.viewports);
     }
 
@@ -523,7 +527,7 @@ impl GlobalState {
 
     pub fn build_viewport_uis(&mut self, ui: &Ui) {
         let frame_size = ui.frame_size().logical_size;
-        let window_width = self.menu_width - 100.0;
+        let window_width = self.menu_width - 95.0;
         let mut viewports = vec![];
         let mut divisions = Evec::new();
         let mut rebuild = false;
@@ -538,13 +542,14 @@ impl GlobalState {
             if opened {
                 ui.window(string.as_ref())
                     .size(
-                        (window_width, _maxf32(rect.height as f32, 400.0)),
+                        (_maxf32(rect.width as f32, window_width), _maxf32(rect.height as f32, 400.0)),
                         ImGuiCond::Always,
                     )
                     .position((x, y), ImGuiCond::Always)
                     .collapsible(false)
                     .movable(false)
                     .resizable(false)
+                    .horizontal_scrollbar(true)
                     .opened(&mut opened)
                     .build(|| {
                         self.build_viewport_ui(
@@ -712,10 +717,20 @@ impl GlobalState {
     fn build_projection_options(&mut self, ui: &Ui, size: (f32, f32), spacing: f32) {
         if ui.button(im_str!("Perspective"), size) {
             self.camera.perspective_projection();
+            for settings in self.vp_settings.values_mut() {
+                if let Some(ref mut camera) = settings.cam {
+                    camera.perspective_projection();
+                }
+            }
         }
         ui.same_line_spacing(size.0, spacing);
         if ui.button(im_str!("Orthographic"), size) {
             self.camera.orthographic_projection();
+            for settings in self.vp_settings.values_mut() {
+                if let Some(ref mut camera) = settings.cam {
+                    camera.orthographic_projection();
+                }
+            }
         }
         ui.same_line_spacing(size.0 * 2.0, spacing + 4.0);
         ui.text("Projection");
@@ -742,7 +757,7 @@ impl GlobalState {
 
     fn build_value_selector(&mut self, ui: &Ui, window_width: f32, to_select: &mut i32) {
         ui.text("Select Variable");
-        ui.child_frame(im_str!("Select Variable"), (window_width - 20.0, 100.0))
+        ui.child_frame(im_str!("Select Variable"), (window_width - 30.0, 100.0))
             .movable(false)
             .show_scrollbar_with_mouse(true)
             .show_borders(false)
@@ -820,11 +835,12 @@ impl Value {
         {
             let range = max - min;
             let middle = (value[0] + value[1]) * 0.5;
+            let middle = middle.round();
             let min_width = (width * (middle - min) / range).round();
             let min_width = minf32(min_width, 2.0);
 
             ui.separator();
-            ui.text("Temperature Range");
+            ui.text("Range");
             ui.push_item_width(width);
             ui.input_float2(im_str!("##Range floats"), value)
                 .decimal_precision(3)

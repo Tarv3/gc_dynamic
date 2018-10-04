@@ -125,13 +125,13 @@ where
             mouse.handle_window_event(&event, &ui, &window.display.gl_window(), hidpi_factor);
         }
         mouse.update_on_ui(&ui);
-
         let mut target = window.display.draw();
+
         if !func(&mut target, &ui, &mouse, &events, delta_s) {
             break;
         }
-
         renderer.render(&mut target, ui).expect("Failed to render");
+        
         target.finish().unwrap();
     }
 }
