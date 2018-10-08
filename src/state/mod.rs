@@ -1,3 +1,4 @@
+mod box_render;
 mod viewports;
 
 use evec::Evec;
@@ -5,12 +6,13 @@ use glium;
 use glium::index::{NoIndices, PrimitiveType::TrianglesList};
 use glium::{
     backend::glutin::Display, draw_parameters::BackfaceCullingMode, texture::Texture2d,
-    DrawParameters, Program, Surface, VertexBuffer,
+    DrawParameters, Program, Rect, Surface, VertexBuffer,
 };
 use imgui::*;
 use input::MouseState;
 use renderer::camera::PCamera;
 use sphere::Sphere;
+use state::box_render::BoxRenderer;
 use state::viewports::{DivDirection, Division, VPSettings, ViewPort, ViewRect};
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -60,6 +62,7 @@ pub struct GlobalState {
     colour_program: Program,
 
     sphere: VertexBuffer<Vertex>,
+    box_renderer: BoxRenderer,
 
     main_viewport: ViewRect,
     divisions: Evec<Division>,
@@ -88,6 +91,7 @@ impl GlobalState {
         path: impl AsRef<Path>,
         hsv_program: Program,
         colour_program: Program,
+        box_program: Program,
     ) -> Result<GlobalState, Box<Error>> {
         let image = load_image(window, path);
         let value = Value {
@@ -136,6 +140,7 @@ impl GlobalState {
                 first_vp.div_id,
                 VPSettings {
                     menu_open: true,
+                    show_range: false,
                     cam: None,
                 },
             );
@@ -147,6 +152,7 @@ impl GlobalState {
             hsv_program,
             colour_program,
             sphere: buffer,
+            box_renderer: BoxRenderer::new(window, box_program),
 
             main_viewport,
             divisions,
@@ -397,9 +403,7 @@ impl GlobalState {
         }
     }
 
-    pub fn change_projection(&mut self) {
-
-    }
+    pub fn change_projection(&mut self) {}
 
     pub fn rebuild_viewports(&mut self) {
         let division = self.divisions[0].unwrap();
@@ -418,6 +422,7 @@ impl GlobalState {
                     id,
                     VPSettings {
                         menu_open: true,
+                        show_range: false,
                         cam: None,
                     },
                 ),
@@ -451,7 +456,12 @@ impl GlobalState {
 
             let id = viewport.div_id;
             let index = self.divisions[id].unwrap().get_selected().unwrap() as usize;
-            let camera = self.get_vp_camera(id);
+            let settings = self.vp_settings.get(&id).expect("No viewport settings");
+            let camera = match settings.cam {
+                Some(ref cam) => cam,
+                None => &self.camera,
+            };
+
             let view_matrix = viewport.view_matrix(camera, self.zoom.get_scale());
             self.draw_globe(
                 index,
@@ -460,8 +470,19 @@ impl GlobalState {
                 *view_matrix.as_ref(),
                 model_matrix,
             );
+
+            let draw_parameters = DrawParameters {
+                viewport: Some(rect),
+                ..Default::default()
+            };
+            if settings.show_range && self.is_selected_measurement(index).is_measurement() {
+                self.box_renderer
+                    .render(target, [0.78, 0.0], [0.1, 1.8], &draw_parameters);
+            }
         }
     }
+
+    pub fn draw_box<T: Surface + ?Sized>(&self, target: &mut T, rect: Rect) {}
 
     pub fn draw_globe<T: Surface + ?Sized>(
         &self,
@@ -499,8 +520,7 @@ impl GlobalState {
                         &self.hsv_program,
                         &uniforms,
                         draw_params,
-                    )
-                    .unwrap();
+                    ).unwrap();
             }
             Measurement::IsNot => {
                 let uniforms = uniform! {
@@ -519,8 +539,7 @@ impl GlobalState {
                         &self.colour_program,
                         &uniforms,
                         draw_params,
-                    )
-                    .unwrap();
+                    ).unwrap();
             }
         }
     }
@@ -542,10 +561,12 @@ impl GlobalState {
             if opened {
                 ui.window(string.as_ref())
                     .size(
-                        (_maxf32(rect.width as f32, window_width), _maxf32(rect.height as f32, 400.0)),
+                        (
+                            _maxf32(rect.width as f32, window_width),
+                            _maxf32(rect.height as f32, 400.0),
+                        ),
                         ImGuiCond::Always,
-                    )
-                    .position((x, y), ImGuiCond::Always)
+                    ).position((x, y), ImGuiCond::Always)
                     .collapsible(false)
                     .movable(false)
                     .resizable(false)
@@ -672,8 +693,7 @@ impl GlobalState {
             .size(
                 (window_width, frame_size.logical_size.1 as f32),
                 ImGuiCond::Always,
-            )
-            .position((0.0, 0.0), ImGuiCond::Always)
+            ).position((0.0, 0.0), ImGuiCond::Always)
             .collapsible(true)
             .movable(false)
             .resizable(false)
@@ -784,6 +804,15 @@ pub enum Measurement {
     },
 }
 
+impl Measurement {
+    pub fn is_measurement(&self) -> bool {
+        match self {
+            Measurement::IsNot => false,
+            Measurement::Is { .. } => true,
+        }
+    }
+}
+
 struct Value {
     measurement: Measurement,
     name: ImString,
@@ -795,7 +824,7 @@ struct Value {
 
 impl Value {
     pub fn build_ui_elements(&mut self, ui: &Ui, window_width: f32) {
-        let width = window_width - 100.0;
+        let width = window_width - 110.0;
         if self.tex_indices.len() > 1 {
             ui.with_item_width(width, || {
                 self.build_time_ui(ui, width);
@@ -809,7 +838,8 @@ impl Value {
     pub fn build_time_ui(&mut self, ui: &Ui, width: f32) {
         let max = (self.tex_indices.len() as i32) as f32;
 
-        if ui.slider_float(im_str!("Time"), &mut self.selection, 0.0, max)
+        if ui
+            .slider_float(im_str!("Time"), &mut self.selection, 0.0, max)
             .build()
         {
             self.time = false;
@@ -835,7 +865,6 @@ impl Value {
         {
             let range = max - min;
             let middle = (value[0] + value[1]) * 0.5;
-            let middle = middle.round();
             let min_width = (width * (middle - min) / range).round();
             let min_width = minf32(min_width, 2.0);
 

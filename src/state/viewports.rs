@@ -1,7 +1,6 @@
 use evec::Evec;
 use glium::Rect;
 use renderer::{camera::PCamera, Mat4};
-use std::iter::Iterator;
 
 #[derive(Copy, Clone, Debug)]
 pub enum DivDirection {
@@ -324,5 +323,6 @@ impl ViewPort {
 #[derive(Debug, Clone, Copy)]
 pub struct VPSettings {
     pub menu_open: bool,
+    pub show_range: bool,
     pub cam: Option<PCamera>,
 }

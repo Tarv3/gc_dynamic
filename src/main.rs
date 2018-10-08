@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+// #![windows_subsystem = "windows"]
 #![allow(dead_code)]
 
 #[macro_use]
@@ -11,28 +11,27 @@ extern crate imgui_glium_renderer as imrender;
 extern crate nalgebra as na;
 extern crate renderer;
 
+mod evec;
 mod input;
 mod sphere;
 mod state;
 mod support;
 mod util;
 mod window;
-mod evec;
 
 use glium::backend::glutin::Display;
-use glium::{
-    draw_parameters::BackfaceCullingMode, glutin::EventsLoop, DrawParameters, Program, Surface,
-};
+use glium::{glutin::EventsLoop, Program, Surface};
 use heat_map::math::Range;
 use imgui::ImString;
 use renderer::{
-    camera::{PCamera, Projection}, Vec3, PV,
+    camera::{PCamera, Projection},
+    Vec3, PV,
 };
 use state::{GlobalState, Measurement};
 use std::f32::consts::PI;
+use support::load_image;
 use util::*;
 use window::Window;
-use support::load_image;
 
 fn build_state(display: &Display) -> GlobalState {
     let camera = PCamera::new(
@@ -56,6 +55,12 @@ fn build_state(display: &Display) -> GlobalState {
         None,
     ).unwrap();
 
+    let box_program = Program::from_source(
+        display,
+        include_str!("shaders/vert_box.glsl"),
+        include_str!("shaders/frag_box.glsl"),
+        None,
+    ).unwrap();
     let monthly_range = [-40.0, 50.0];
     let stdrange = [0.0, 40.0];
     let (avg, monthly_values, stddev) = load_temp_values(
@@ -74,6 +79,7 @@ fn build_state(display: &Display) -> GlobalState {
         "assets/map_pic.jpg",
         hsv_program,
         colour_program,
+        box_program,
     ).unwrap();
     let height = vec![load_image(display, "assets/whms.png")];
 
@@ -83,10 +89,10 @@ fn build_state(display: &Display) -> GlobalState {
         Measurement::Is {
             normalised: [0.0, 1.0],
             init_range: [0.0, 1.0],
-            range: [0.0, 1.0]
+            range: [0.0, 1.0],
         },
     );
-    
+
     glstate.add_new_value(
         avg,
         ImString::new("Average Temperature"),
@@ -122,26 +128,22 @@ fn build_state(display: &Display) -> GlobalState {
 
 fn main() {
     let mut events_loop = EventsLoop::new();
-    let mut window = Window::new("Climate Visualisation", false, true, true, None, &events_loop);
+    let mut window = Window::new(
+        "Climate Visualisation",
+        false,
+        true,
+        true,
+        None,
+        &events_loop,
+    );
     let hidpi = window.display.gl_window().get_hidpi_factor() as f32;
-    
     let mut glstate = build_state(&window.display);
     let identity: na::Matrix4<f32> = na::Matrix4::identity();
-
-    let draw_parameters = DrawParameters {
-        depth: glium::Depth {
-            test: glium::DepthTest::IfLess,
-            write: true,
-            ..Default::default()
-        },
-        backface_culling: BackfaceCullingMode::CullClockwise,
-        ..Default::default()
-    };
 
     support::run(
         &mut window,
         &mut events_loop,
-        |target, ui, mouse, events, dt| {
+        |target, ui, mouse, events, dt, no_render| {
             let dims = target.get_dimensions();
             glstate.update_time(dt);
             glstate.build_ui(ui);
@@ -154,7 +156,9 @@ fn main() {
             }
 
             target.clear_color_and_depth((1.0, 1.0, 1.0, 0.0), 1.0);
-            glstate.render_viewports(target, *identity.as_ref());
+            if !no_render {
+                glstate.render_viewports(target, *identity.as_ref());
+            }
             true
         },
     );

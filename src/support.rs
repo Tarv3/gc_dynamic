@@ -1,12 +1,14 @@
 use glium::backend::glutin::Display;
 use glium::texture::{texture2d::Texture2d, RawImage2d};
 use glium::{
-    glutin::{ElementState, Event, EventsLoop, VirtualKeyCode, WindowEvent}, Frame,
+    glutin::{ElementState, Event, EventsLoop, VirtualKeyCode, WindowEvent},
+    Frame,
 };
 use image;
 use imgui::{FrameSize, ImGui, ImGuiKey, Ui};
 use imrender::Renderer;
 use input::MouseState;
+use std::error::Error;
 use std::path::Path;
 use std::time::Instant;
 use window::Window;
@@ -84,7 +86,7 @@ fn set_special_keys(imgui: &mut ImGui) {
 
 pub fn run<F>(window: &mut Window, events_loop: &mut EventsLoop, mut func: F)
 where
-    F: FnMut(&mut Frame, &Ui, &MouseState, &Vec<Event>, f32) -> bool,
+    F: FnMut(&mut Frame, &Ui, &MouseState, &Vec<Event>, f32, bool) -> bool,
 {
     let hidpi_factor = window.display.gl_window().get_hidpi_factor().round();
     let (mut imgui, mut renderer) = build_imgui(window, hidpi_factor as f32);
@@ -102,7 +104,7 @@ where
             .get_inner_size()
             .expect("Failed to get inner size")
             .to_physical(window.display.gl_window().get_hidpi_factor());
-
+        let no_render = physical_size.width == 0.0 || physical_size.height == 0.0;
         let frame_size = FrameSize {
             logical_size: physical_size.to_logical(hidpi_factor).into(),
             hidpi_factor,
@@ -125,13 +127,17 @@ where
             mouse.handle_window_event(&event, &ui, &window.display.gl_window(), hidpi_factor);
         }
         mouse.update_on_ui(&ui);
-        let mut target = window.display.draw();
 
-        if !func(&mut target, &ui, &mouse, &events, delta_s) {
+        let mut target = window.display.draw();
+        if !func(&mut target, &ui, &mouse, &events, delta_s, no_render) {
             break;
         }
-        renderer.render(&mut target, ui).expect("Failed to render");
-        
+        if no_render {
+            ui.render(|_, _| -> Result<(), Box<Error>> { Ok(()) })
+                .expect("Failed to render");
+        } else {
+            renderer.render(&mut target, ui).expect("Failed to render");
+        }
         target.finish().unwrap();
     }
 }

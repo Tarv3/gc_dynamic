@@ -1,4 +1,4 @@
-use glium::{backend::glutin::Display, texture::Texture2d};
+use glium::{backend::glutin::Display, texture::Texture2d, VertexBuffer};
 use heat_map;
 use std::path::Path;
 
@@ -11,10 +11,46 @@ pub struct Vertex {
 
 implement_vertex!(Vertex, position, normal, tex_coord);
 
+#[derive(Copy, Clone, Debug)]
+pub struct BoxVertex {
+    pub position: [f32; 2],
+    pub hue: f32,
+}
+
+implement_vertex!(BoxVertex, position, hue);
+
+pub fn build_box(display: &Display, width: f32, height: f32) -> VertexBuffer<BoxVertex> {
+    let right = width * 0.5;
+    let left = -right;
+    let top = height * 0.5;
+    let bottom = -top;
+
+    let vals = [
+        BoxVertex {
+            position: [left, bottom],
+            hue: 0.0,
+        },
+        BoxVertex {
+            position: [right, bottom],
+            hue: 0.0,
+        },
+        BoxVertex {
+            position: [left, top],
+            hue: 1.0,
+        },
+        BoxVertex {
+            position: [right, top],
+            hue: 1.0,
+        },
+    ];
+
+    VertexBuffer::new(display, &vals).unwrap()
+}
+
 pub fn load_temp_grid(
     path: impl AsRef<Path>,
 ) -> heat_map::grid::Grid<Option<heat_map::data::YearlyData<f32>>> {
-        heat_map::grid::Grid::load_from_bin(path).unwrap()
+    heat_map::grid::Grid::load_from_bin(path).unwrap()
 }
 
 pub fn load_temp_values(
@@ -27,12 +63,8 @@ pub fn load_temp_values(
         heat_map::grid::Grid::load_from_bin(path).unwrap();
 
     let monthly_temps = load_monthly_values(display, &temp_grid, range);
-    let avg_temp = vec![
-        load_yearly_average(display, &temp_grid, range)
-    ];
-    let stddev = vec![
-        load_yearly_stddev(display, &temp_grid, std_range)
-    ];
+    let avg_temp = vec![load_yearly_average(display, &temp_grid, range)];
+    let stddev = vec![load_yearly_stddev(display, &temp_grid, std_range)];
     (avg_temp, monthly_temps, stddev)
 }
 
@@ -63,8 +95,7 @@ pub fn load_yearly_average(
         .into_grid_with(|temp| match temp {
             Some(data) => data.yearly_average(),
             None => None,
-        })
-        .into_texture(display, Some(range))
+        }).into_texture(display, Some(range))
         .0
 }
 
@@ -77,8 +108,7 @@ pub fn load_yearly_stddev(
         .into_grid_with(|temp| match temp {
             Some(data) => data.standard_dev(),
             None => None,
-        })
-        .into_texture(display, Some(range))
+        }).into_texture(display, Some(range))
         .0
 }
 
