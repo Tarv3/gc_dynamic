@@ -88,8 +88,9 @@ pub fn run<F>(window: &mut Window, events_loop: &mut EventsLoop, mut func: F)
 where
     F: FnMut(&mut Frame, &Ui, &MouseState, &Vec<Event>, f32, bool) -> bool,
 {
-    let hidpi_factor = window.display.gl_window().get_hidpi_factor().round();
-    let (mut imgui, mut renderer) = build_imgui(window, hidpi_factor as f32);
+    let hdp = window.display.gl_window().get_hidpi_factor();
+    let hidpi_factor = hdp.round();
+    let (mut imgui, mut renderer) = build_imgui(window, hdp as f32);
     set_special_keys(&mut imgui);
     let mut mouse = MouseState::new();
     let mut last_frame = Instant::now();

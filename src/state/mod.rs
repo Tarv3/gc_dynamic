@@ -103,7 +103,7 @@ impl GlobalState {
             time_updated: false,
         };
 
-        let sphere = Sphere::new(250, 250);
+        let sphere = Sphere::new(16, 36);
         let verts = sphere.generate_vertices();
         let buffer = VertexBuffer::new(window, &verts)?;
         let zoom = Zoom {
