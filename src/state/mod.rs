@@ -1,4 +1,7 @@
 mod box_render;
+mod tool_tips;
+pub mod value;
+mod variable;
 mod viewports;
 
 use evec::Evec;
@@ -13,6 +16,9 @@ use input::MouseState;
 use renderer::camera::PCamera;
 use sphere::Sphere;
 use state::box_render::BoxRenderer;
+use state::tool_tips::*;
+use state::value::*;
+use state::variable::*;
 use state::viewports::{DivDirection, Division, VPSettings, ViewPort, ViewRect};
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -20,40 +26,6 @@ use std::mem;
 use std::path::Path;
 use support::load_image;
 use util::*;
-
-pub struct Zoom {
-    pub rate: f32,
-    pub level: f32,
-    pub min: Option<f32>,
-    pub max: Option<f32>,
-}
-
-impl Zoom {
-    pub fn add_zoom(&mut self, zoom: f32) {
-        self.level += zoom;
-
-        if let Some(max) = self.max {
-            if max < self.level {
-                self.level = max;
-            }
-        }
-        if let Some(min) = self.min {
-            if min > self.level {
-                self.level = min;
-            }
-        }
-    }
-
-    pub fn get_scale(&self) -> f32 {
-        self.rate.powf(self.level)
-    }
-}
-
-struct StateVariables {
-    pub height: f32,
-    pub time_multi: f32,
-    pub drag_speed: f32,
-}
 
 pub struct GlobalState {
     pub camera: PCamera,
@@ -79,6 +51,7 @@ pub struct GlobalState {
 
     m1_pressed: bool,
     viewport_pressed: Option<usize>,
+    mouse_vars: MouseVariables,
 }
 
 impl GlobalState {
@@ -168,6 +141,7 @@ impl GlobalState {
             menu_width: 300.0,
             m1_pressed: false,
             viewport_pressed: None,
+            mouse_vars: MouseVariables::new(),
         })
     }
 
@@ -193,25 +167,18 @@ impl GlobalState {
     }
 
     pub fn handle_mouse(&mut self, mouse: &MouseState, dimensions: (u32, u32), hidpi: f32) {
-        let m1 = mouse.mouse.pressed.0;
+        self.mouse_vars
+            .handle_mouse(mouse, self.viewports.as_slice(), dimensions);
+
         if !mouse.on_ui {
             self.zoom.add_zoom(-mouse.mouse.wheel);
-            if m1 && !self.m1_pressed {
-                let pos = *mouse.mouse.position.as_ref();
-                let x = pos[0] / dimensions.0 as f32;
-                let y = 1.0 - pos[1] / dimensions.1 as f32;
-                self.viewport_pressed = self.on_viewport([x, y]);
-            } else if !m1 && self.m1_pressed {
-                self.viewport_pressed = None;
-            }
         }
         if let Some(drag) = mouse.get_drag_off_ui() {
-            let abs_x = drag.x.abs();
-            let abs_y = drag.y.abs();
-            let drag_x = clampf32(self.zoom.get_scale() * drag.x, -abs_x, abs_x);
-            let drag_y = clampf32(self.zoom.get_scale() * drag.y, -abs_y, abs_y);
+            let (x_abs, y_abs) = (drag.x.abs(), drag.y.abs());
+            let drag_x = clampf32(self.zoom.get_scale() * drag.x, -x_abs, x_abs);
+            let drag_y = clampf32(self.zoom.get_scale() * drag.y, -y_abs, y_abs);
             let drag_speed = self.variables.drag_speed;
-            let camera = match self.viewport_pressed {
+            let camera = match self.mouse_vars.viewport_pressed {
                 Some(id) => {
                     let div_id = self.viewports[id].div_id;
                     self.get_vp_camera_mut(div_id)
@@ -221,8 +188,6 @@ impl GlobalState {
             camera.rotate_around_look_horizontal(-drag_x * drag_speed / hidpi);
             camera.rotate_around_look_vertical(drag_y * drag_speed / hidpi);
         }
-
-        self.m1_pressed = m1;
     }
 
     pub fn handle_resize(&mut self, resized: (f64, f64), hidpi: f32) {
@@ -336,6 +301,7 @@ impl GlobalState {
         let time_multi = self.variables.time_multi;
         let mut viewports = vec![];
         mem::swap(&mut viewports, &mut self.viewports);
+
         for viewport in &viewports {
             let index = match viewport.get_div_selection(&self.divisions.values) {
                 Some(index) => index as usize,
@@ -410,9 +376,11 @@ impl GlobalState {
         let main_viewport = self.main_viewport;
         let mut viewports = vec![];
         mem::swap(&mut viewports, &mut self.viewports);
+
         viewports.clear();
         division.build_viewports_evec(main_viewport, &self.divisions, &mut viewports);
         let mut settings = BTreeMap::new();
+
         for viewport in &viewports {
             let id = viewport.div_id;
             let value = self.vp_settings.get(&id);
@@ -475,6 +443,7 @@ impl GlobalState {
                 viewport: Some(rect),
                 ..Default::default()
             };
+
             if settings.show_range && self.is_selected_measurement(index).is_measurement() {
                 self.box_renderer
                     .render(target, [0.78, 0.0], [0.1, 1.8], &draw_parameters);
@@ -544,14 +513,57 @@ impl GlobalState {
         }
     }
 
+    pub fn viewport_window<F: FnOnce() -> ()>(
+        ui: &Ui,
+        name: &ImStr,
+        pos: (f32, f32),
+        rect: glium::Rect,
+        width: f32,
+        opened: &mut bool,
+        func: F,
+    ) {
+        let x = _maxf32(rect.width as f32, width);
+        let y =  _maxf32(rect.height as f32, 400.0);
+        ui.window(name)
+            .size(
+                (x, y),
+                ImGuiCond::Always,
+            ).position(pos, ImGuiCond::Always)
+            .collapsible(false)
+            .movable(false)
+            .resizable(false)
+            .horizontal_scrollbar(true)
+            .opened(opened)
+            .build(func);
+    }
+
+    pub fn closed_window(&mut self, ui: &Ui, pos: (f32, f32), opened: &mut bool) {
+        ui.with_color_var(ImGuiCol::WindowBg, [0.0, 0.0, 0.0, 0.0], || {
+            ui.window(im_str!(""))
+                .position(pos, ImGuiCond::Always)
+                .size((50.0, 35.0), ImGuiCond::Always)
+                .title_bar(false)
+                .collapsible(false)
+                .resizable(false)
+                .movable(false)
+                .build(|| {
+                    if ui.small_button(im_str!("Menu")) {
+                        *opened = true;
+                    }
+                });
+        });
+    }
+
     pub fn build_viewport_uis(&mut self, ui: &Ui) {
         let frame_size = ui.frame_size().logical_size;
         let window_width = self.menu_width - 95.0;
         let mut viewports = vec![];
         let mut divisions = Evec::new();
         let mut rebuild = false;
+
         mem::swap(&mut viewports, &mut self.viewports);
         mem::swap(&mut divisions, &mut self.divisions);
+
         for (i, viewport) in viewports.iter().enumerate() {
             let rect = viewport.glium_vp_logicalsize(frame_size);
             let x = rect.left as f32;
@@ -559,20 +571,9 @@ impl GlobalState {
             let string = ImString::new(format!("Viewport {}", i));
             let mut opened = self.get_vp_menu_open(viewport.div_id).unwrap_or(false);
             if opened {
-                ui.window(string.as_ref())
-                    .size(
-                        (
-                            _maxf32(rect.width as f32, window_width),
-                            _maxf32(rect.height as f32, 400.0),
-                        ),
-                        ImGuiCond::Always,
-                    ).position((x, y), ImGuiCond::Always)
-                    .collapsible(false)
-                    .movable(false)
-                    .resizable(false)
-                    .horizontal_scrollbar(true)
-                    .opened(&mut opened)
-                    .build(|| {
+                GlobalState::viewport_window(
+                    ui, string.as_ref(), (x, y), rect, window_width, &mut opened,
+                    || {
                         self.build_viewport_ui(
                             ui,
                             window_width,
@@ -580,27 +581,16 @@ impl GlobalState {
                             &mut divisions,
                             &mut rebuild,
                         );
-                    });
+                    },
+                );
             } else {
-                ui.with_color_var(ImGuiCol::WindowBg, [0.0, 0.0, 0.0, 0.0], || {
-                    ui.window(string.as_ref())
-                        .position((x, y), ImGuiCond::Always)
-                        .size((50.0, 35.0), ImGuiCond::Always)
-                        .title_bar(false)
-                        .collapsible(false)
-                        .resizable(false)
-                        .movable(false)
-                        .build(|| {
-                            if ui.small_button(im_str!("Menu")) {
-                                opened = true;
-                            }
-                        });
-                });
+                self.closed_window(ui, (x, y), &mut opened);
             }
             if let Some(menu) = self.get_vp_menu_open_mut(viewport.div_id) {
                 *menu = opened;
             }
         }
+
         mem::swap(&mut viewports, &mut self.viewports);
         mem::swap(&mut divisions, &mut self.divisions);
 
@@ -617,6 +607,8 @@ impl GlobalState {
         divisions: &mut Evec<Division>,
         rebuild: &mut bool,
     ) {
+        let hovered = self.mouse_vars.hovered;
+
         ui.text("Split");
         let button_size = (80.0, 40.0);
         let id = viewport.div_id;
@@ -628,11 +620,15 @@ impl GlobalState {
             div.divide(DivDirection::Verticle(0.5), divisions);
             *rebuild = true;
         }
+        vertical_split_tt(ui, hovered);
+
         ui.same_line_spacing(button_size.0, 12.0);
         if ui.button(im_str!("Horizontal"), button_size) {
             div.divide(DivDirection::Horizontal(0.5), divisions);
             *rebuild = true;
         }
+        horizontal_split_tt(ui, hovered);
+
         if let Some(parent) = div.get_parent() {
             if ui.button(im_str!("Collapse"), button_size) {
                 let parent = divisions[parent].unwrap();
@@ -649,6 +645,7 @@ impl GlobalState {
                 };
                 *rebuild = true;
             }
+            collapse_tt(ui, hovered);
         }
 
         if !*rebuild {
@@ -656,18 +653,24 @@ impl GlobalState {
                 if ui.small_button(im_str!("Lock")) {
                     self.remove_vp_cam(id);
                 }
+                lock_tt(ui, hovered);
             } else {
                 if ui.small_button(im_str!("UnLock")) {
                     self.give_vp_global_cam(id);
                 }
+                unlock_tt(ui, hovered);
+
             }
+
             ui.separator();
             ui.spacing();
+
             let mut dummy = 0;
             let div = match viewport.get_div_selection_mut(&mut divisions.values) {
                 Some(val) => val,
                 None => &mut dummy,
             };
+            
             self.build_value_selector(ui, window_width, div);
         } else {
             if self.vp_has_cam(id) {
@@ -689,6 +692,7 @@ impl GlobalState {
     pub fn build_ui(&mut self, ui: &Ui) {
         let frame_size = ui.frame_size();
         let window_width = self.menu_width;
+
         ui.window(im_str!("State"))
             .size(
                 (window_width, frame_size.logical_size.1 as f32),
@@ -701,7 +705,7 @@ impl GlobalState {
                 let button_size = 100.0;
                 let button_y = 30.0;
                 self.build_projection_options(ui, (button_size, button_y), 12.0);
-                self.build_variable_sliders(ui, button_size * 2.0 + 4.0);
+                self.variables.build_variable_sliders(ui, button_size * 2.0 + 4.0, self.mouse_vars.hovered);
                 self.build_user_buttons(ui, (100.0, 40.0), 12.0);
 
                 ui.text(format!("Fps: {:.2}", ui.framerate()));
@@ -756,25 +760,6 @@ impl GlobalState {
         ui.text("Projection");
     }
 
-    fn build_variable_sliders(&mut self, ui: &Ui, width: f32) {
-        ui.with_item_width(width, || {
-            ui.slider_float(
-                im_str!("Drag Speed"),
-                &mut self.variables.drag_speed,
-                0.005,
-                0.08,
-            ).build();
-            ui.slider_float(im_str!("Height"), &mut self.variables.height, 0.0, 1.0)
-                .build();
-            ui.slider_float(
-                im_str!("Time Multi"),
-                &mut self.variables.time_multi,
-                0.0,
-                10.0,
-            ).build();
-        });
-    }
-
     fn build_value_selector(&mut self, ui: &Ui, window_width: f32, to_select: &mut i32) {
         ui.text("Select Variable");
         ui.child_frame(im_str!("Select Variable"), (window_width - 30.0, 100.0))
@@ -787,132 +772,11 @@ impl GlobalState {
                     ui.radio_button(value.name.as_ref(), to_select, i as i32);
                 }
             });
+        value_selector_tt(ui, self.mouse_vars.hovered);
+
         let selected = &mut self.values[*to_select as usize];
         ui.separator();
         ui.text(&selected.name);
-        selected.build_ui_elements(ui, window_width);
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum Measurement {
-    IsNot,
-    Is {
-        normalised: [f32; 2],
-        init_range: [f32; 2],
-        range: [f32; 2],
-    },
-}
-
-impl Measurement {
-    pub fn is_measurement(&self) -> bool {
-        match self {
-            Measurement::IsNot => false,
-            Measurement::Is { .. } => true,
-        }
-    }
-}
-
-struct Value {
-    measurement: Measurement,
-    name: ImString,
-    tex_indices: Vec<usize>,
-    selection: f32,
-    time: bool,
-    time_updated: bool,
-}
-
-impl Value {
-    pub fn build_ui_elements(&mut self, ui: &Ui, window_width: f32) {
-        let width = window_width - 110.0;
-        if self.tex_indices.len() > 1 {
-            ui.with_item_width(width, || {
-                self.build_time_ui(ui, width);
-            });
-        }
-        ui.with_item_width(width, || {
-            self.build_measurement_ui(ui, window_width - 50.0);
-        });
-    }
-
-    pub fn build_time_ui(&mut self, ui: &Ui, width: f32) {
-        let max = (self.tex_indices.len() as i32) as f32;
-
-        if ui
-            .slider_float(im_str!("Time"), &mut self.selection, 0.0, max)
-            .build()
-        {
-            self.time = false;
-        }
-        ui.same_line_spacing(width, 45.0);
-        if self.time {
-            if ui.button(im_str!("Pause"), (40.0, 20.0)) {
-                self.time = false;
-            }
-        } else {
-            if ui.button(im_str!("Play"), (40.0, 20.0)) {
-                self.time = true;
-            }
-        }
-    }
-
-    pub fn build_measurement_ui(&mut self, ui: &Ui, width: f32) {
-        if let Measurement::Is {
-            init_range: [min, max],
-            range: ref mut value,
-            ..
-        } = self.measurement
-        {
-            let range = max - min;
-            let middle = (value[0] + value[1]) * 0.5;
-            let min_width = (width * (middle - min) / range).round();
-            let min_width = minf32(min_width, 2.0);
-
-            ui.separator();
-            ui.text("Range");
-            ui.push_item_width(width);
-            ui.input_float2(im_str!("##Range floats"), value)
-                .decimal_precision(3)
-                .build();
-            ui.push_item_width(min_width);
-            ui.slider_float(im_str!("##Min Range"), &mut value[0], min, middle)
-                .build();
-
-            ui.same_line(min_width + 8.0);
-            let max_width = width - min_width;
-            let max_width = minf32(max_width, 2.0);
-            ui.push_item_width(max_width);
-            ui.slider_float(im_str!("##Max Range"), &mut value[1], middle, max)
-                .build();
-        }
-    }
-
-    pub fn get_textures(&self) -> (usize, usize, f32) {
-        let mut ceil = self.selection.ceil() as usize;
-        if ceil >= self.tex_indices.len() {
-            ceil = 0;
-        }
-        let mut floor = self.selection.floor();
-        if floor >= self.tex_indices.len() as f32 {
-            floor = (self.tex_indices.len() - 1) as f32;
-        }
-        let interpolation = self.selection - floor;
-
-        (
-            self.tex_indices[floor as usize],
-            self.tex_indices[ceil],
-            interpolation,
-        )
-    }
-
-    pub fn increase_selection(&mut self, dt: f32) {
-        if self.tex_indices.len() < 1 {
-            return;
-        }
-        self.selection += dt;
-        let max = self.tex_indices.len() as f32;
-        if self.selection > max {
-            self.selection = self.selection - max;
-        }
+        selected.build_ui_elements(ui, window_width, self.mouse_vars.hovered);
     }
 }

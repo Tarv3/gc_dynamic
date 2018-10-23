@@ -27,7 +27,7 @@ use renderer::{
     camera::{PCamera, Projection},
     Vec3, PV,
 };
-use state::{GlobalState, Measurement};
+use state::{GlobalState, value::Measurement};
 use std::f32::consts::PI;
 use support::load_image;
 use util::*;

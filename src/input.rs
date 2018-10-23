@@ -53,6 +53,7 @@ impl Mouse {
 
 pub struct MouseState {
     pub mouse: Mouse,
+    pub hovered: f32,
     pub pressed_on_ui: bool,
     pub on_ui: bool,
 }
@@ -61,12 +62,13 @@ impl MouseState {
     pub fn new() -> MouseState {
         MouseState {
             mouse: Mouse::new(),
+            hovered: 0.0,
             pressed_on_ui: false,
             on_ui: false,
         }
     }
 
-    pub fn update_mouse(&self, ui: &mut ImGui) {
+    pub fn update_mouse(&mut self, ui: &mut ImGui, time: f32) {
         ui.set_mouse_down([
             self.mouse.pressed.0,
             self.mouse.pressed.1,
@@ -76,6 +78,7 @@ impl MouseState {
         ]);
         ui.set_mouse_wheel(self.mouse.wheel);
         ui.set_mouse_pos(self.mouse.position.x.round(), self.mouse.position.y.round());
+        self.hovered += time;
     }
 
     pub fn update_on_ui(&mut self, ui: &Ui) {
@@ -113,6 +116,7 @@ impl MouseState {
                         .to_physical(window.get_hidpi_factor())
                         .to_logical(hidpi_factor);
                     self.mouse.move_to_tuple((pos.x as f32, pos.y as f32));
+                    self.hovered = 0.0;
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
                     let y = match delta {

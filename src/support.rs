@@ -111,7 +111,7 @@ where
             hidpi_factor,
         };
 
-        mouse.update_mouse(&mut imgui);
+        mouse.update_mouse(&mut imgui, delta_s);
         mouse.reset();
 
         events.clear();
